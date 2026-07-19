@@ -55,22 +55,25 @@ def cmd_info(save_path):
 
 def main():
     args = sys.argv[1:]
-    cmd = args[0] if args else 'info'
-    save = args[1] if len(args) > 1 else DEFAULT_SAVE
-
-    if not os.path.exists(save):
-        print(f"Save file not found: {save}")
-        sys.exit(1)
-
-    if cmd == 'dump':
-        cmd_dump(save)
-    elif cmd == 'pack':
-        cmd_pack(save)
-    elif cmd == 'info':
-        cmd_info(save)
+    if not args:
+        from ui import main as ui_main
+        ui_main()
+        return
+    cmd = args[0]
+    if cmd in ('dump', 'pack', 'info'):
+        save = args[1] if len(args) > 1 else DEFAULT_SAVE
+        if not os.path.exists(save):
+            print(f"Save file not found: {save}")
+            sys.exit(1)
+        if cmd == 'dump':
+            cmd_dump(save)
+        elif cmd == 'pack':
+            cmd_pack(save)
+        elif cmd == 'info':
+            cmd_info(save)
     elif cmd == 'ui':
-        from ui import main
-        main()
+        from ui import main as ui_main
+        ui_main()
     else:
         print(__doc__)
 

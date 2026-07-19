@@ -1,6 +1,12 @@
 # Sailwind Save Editor
 
-Cross-platform save file editor for the game **Sailwind** (Steam App ID 1764530). Built with Python and [Flet](https://flet.dev/) for native desktop UI (Windows, macOS, Linux) with future mobile/web support.
+Cross-platform save file editor for the game **Sailwind** (Steam App ID 1764530). Built with Python and [Flet](https://flet.dev/) for native desktop UI (Windows, Linux).
+
+---
+
+# Редактор сохранений Sailwind
+
+Кроссплатформенный редактор файлов сохранений для игры **Sailwind** (Steam App ID 1764530). Написан на Python с использованием [Flet](https://flet.dev/) для нативного интерфейса на Windows и Linux.
 
 ## Features
 
@@ -9,32 +15,92 @@ Cross-platform save file editor for the game **Sailwind** (Steam App ID 1764530)
 - **Key fields highlighted** (playerGold, water/food/sleep, time/day, etc.)
 - **Auto-backup** creates `.bak` before saving
 - **Export/Import JSON** for manual editing or version control
-- **Cross-platform** — Flet compiles to Windows/macOS/Linux desktop, with future Android/iOS/Web support
+- **Cross-platform** — native desktop builds for Windows and Linux
+
+## Возможности
+
+- **Открытие `.save` файлов** через нативный файловый диалог
+- **Редактирование всех полей** (Int32, Boolean, Int64, Single и др.) в табличном интерфейсе
+- **Ключевые поля выделены** (playerGold, вода/еда/сон, время/день и др.)
+- **Автобэкап** создаёт `.bak` перед сохранением
+- **Экспорт/импорт JSON** для ручного редактирования или версионирования
+- **Кроссплатформенность** — нативные сборки для Windows и Linux
 
 ## Installation
 
+### From Releases (Recommended)
+
+Download the latest binary for your OS from the [Releases](https://github.com/qotique/SailwindSaveEditor/releases) page:
+
+- **Linux**: `sailwind_editor_linux`
+- **Windows**: `sailwind_editor_windows.exe`
+
+Make executable and run (Linux):
+
 ```bash
-pip install flet nrbf
+chmod +x sailwind_editor_linux
+./sailwind_editor_linux ui
 ```
 
-Or use `pip install -e .` if packaging as a module.
+### From Source
+
+```bash
+pip install flet nrbf
+python3 sailwind_editor.py ui
+```
+
+## Установка
+
+### Из релизов (Рекомендуется)
+
+Скачайте готовый бинарник для вашей ОС со страницы [Releases](https://github.com/qotique/SailwindSaveEditor/releases):
+
+- **Linux**: `sailwind_editor_linux`
+- **Windows**: `sailwind_editor_windows.exe`
+
+Сделайте исполняемым и запустите (Linux):
+
+```bash
+chmod +x sailwind_editor_linux
+./sailwind_editor_linux ui
+```
+
+### Из исходников
+
+```bash
+pip install flet nrbf
+python3 sailwind_editor.py ui
+```
 
 ## Usage
 
-### CLI (original functionality preserved)
+### GUI (default)
+
+```bash
+# Linux
+./sailwind_editor_linux
+
+# Windows
+sailwind_editor_windows.exe
+```
+
+Opens native window with:
+- **Open Save File** button
+- Table of all editable fields with inline editing
+- **Save File** (auto-backup + diff)
+- **Export JSON** / **Import JSON**
+
+### CLI
 
 ```bash
 # Show editable fields
-python3 sailwind_editor.py info [save_file]
+./sailwind_editor_linux info [save_file]
 
 # Export to JSON for manual editing
-python3 sailwind_editor.py dump [save_file]
+./sailwind_editor_linux dump [save_file]
 
 # Import from JSON
-python3 sailwind_editor.py pack [save_file]
-
-# Launch GUI
-python3 sailwind_editor.py ui [save_file]
+./sailwind_editor_linux pack [save_file]
 ```
 
 Default save path (Steam Proton on Linux):
@@ -42,17 +108,41 @@ Default save path (Steam Proton on Linux):
 ~/.local/share/Steam/steamapps/compatdata/1764530/pfx/drive_c/users/steamuser/AppData/LocalLow/Raw Lion Workshop/Sailwind/slot0.save
 ```
 
-### GUI
+## Использование
+
+### GUI (по умолчанию)
 
 ```bash
-python3 sailwind_editor.py ui
+# Linux
+./sailwind_editor_linux
+
+# Windows
+sailwind_editor_windows.exe
 ```
 
-Opens a native window with:
-- **Open Save File** button
-- Table of all editable fields with inline editing
-- **Save File** (auto-backup + diff)
-- **Export JSON** / **Import JSON**
+Открывается нативное окно с:
+- Кнопка открытия файла сохранения
+- Таблица всех редактируемых полей с inline-редактированием
+- **Сохранение файла** (автобэкап + дифф)
+- **Экспорт/импорт JSON**
+
+### CLI
+
+```bash
+# Показать редактируемые поля
+./sailwind_editor_linux info [файл_сохранения]
+
+# Экспорт в JSON для ручного редактирования
+./sailwind_editor_linux dump [файл_сохранения]
+
+# Импорт из JSON
+./sailwind_editor_linux pack [файл_сохранения]
+```
+
+Путь к сохранению по умолчанию (Steam Proton на Linux):
+```
+~/.local/share/Steam/steamapps/compatdata/1764530/pfx/drive_c/users/steamuser/AppData/LocalLow/Raw Lion Workshop/Sailwind/slot0.save
+```
 
 ## Project Structure
 
@@ -67,11 +157,30 @@ sailwind_editor/
 └── README.md
 ```
 
+## Структура проекта
+
+```
+sailwind_editor/
+├── core.py              # Ядро: бинарный патчинг (класс SailwindSave)
+├── ui.py                # GUI на Flet
+├── sailwind_editor.py   # CLI точка входа (dump/pack/info/ui)
+├── tests/
+│   ├── conftest.py      # Фикстуры тестов (генератор мок-сохранений)
+│   └── test_core.py     # Юнит-тесты (15 тестов проходят)
+└── README.md
+```
+
 ## Architecture
 
 - **core.py** — Pure Python, no GUI dependencies. Parses .NET BinaryFormatter (NRBF) save files, finds field offsets, patches binary data in-place.
-- **ui.py** — Flet-based GUI. Uses `FilePicker` for file selection, `TextField` for inline editing. Runs on desktop; future-proof for mobile/web.
+- **ui.py** — Flet-based GUI. Uses `FilePicker` for file selection, `TextField` for inline editing. Runs on desktop.
 - **sailwind_editor.py** — Thin CLI wrapper reusing core logic.
+
+## Архитектура
+
+- **core.py** — Чистый Python, без GUI-зависимостей. Парсит .NET BinaryFormatter (NRBF), находит смещения полей, патчит бинарные данные inplace.
+- **ui.py** — GUI на Flet. Использует `FilePicker` для выбора файла, `TextField` для inline-редактирования. Работает на десктопе.
+- **sailwind_editor.py** — Тонкая CLI-обёртка, переиспользующая логику core.
 
 ## Testing
 
@@ -87,11 +196,34 @@ All 15 tests pass, covering:
 - Backup creation
 - Error handling
 
+## Тестирование
+
+```bash
+cd /home/u/sailwind_editor
+python3 -m pytest tests/ -v
+```
+
+Все 15 тестов проходят, покрывают:
+- Обнаружение полей (скалярные/массивы, Int32/Boolean)
+- Операции патчинга (скалярные/массивы, граничные случаи Boolean)
+- JSON экспорт/импорт туда-обратно
+- Создание бэкапов
+- Обработку ошибок
+
 ## License
 
 MIT License — see [LICENSE](LICENSE).
+
+## Лицензия
+
+MIT License — см. [LICENSE](LICENSE).
 
 ## Credits
 
 - NRBF parsing via [`nrbf`](https://pypi.org/project/nrbf/) by @vickas
 - UI via [Flet](https://flet.dev/) (Flutter-powered Python framework)
+
+## Благодарности
+
+- Парсинг NRBF через [`nrbf`](https://pypi.org/project/nrbf/) от @vickas
+- UI через [Flet](https://flet.dev/) (Flutter-powered Python framework)
