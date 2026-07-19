@@ -74,38 +74,50 @@ python3 sailwind_editor.py ui
 
 ## Usage
 
-### GUI
+### GUI (default)
 
 ```bash
 # Linux
-./sailwind_editor_linux ui
+./sailwind_editor_linux
 
 # Windows
-sailwind_editor_windows.exe ui
+sailwind_editor_windows.exe
 ```
 
-Opens a native window with:
+Opens native window with:
 - **Open Save File** button
 - Table of all editable fields with inline editing
 - **Save File** (auto-backup + diff)
 - **Export JSON** / **Import JSON**
 
-### Default save path (Steam Proton on Linux)
+### CLI
 
+```bash
+# Show editable fields
+./sailwind_editor_linux info [save_file]
+
+# Export to JSON for manual editing
+./sailwind_editor_linux dump [save_file]
+
+# Import from JSON
+./sailwind_editor_linux pack [save_file]
+```
+
+Default save path (Steam Proton on Linux):
 ```
 ~/.local/share/Steam/steamapps/compatdata/1764530/pfx/drive_c/users/steamuser/AppData/LocalLow/Raw Lion Workshop/Sailwind/slot0.save
 ```
 
 ## Использование
 
-### GUI
+### GUI (по умолчанию)
 
 ```bash
 # Linux
-./sailwind_editor_linux ui
+./sailwind_editor_linux
 
 # Windows
-sailwind_editor_windows.exe ui
+sailwind_editor_windows.exe
 ```
 
 Открывается нативное окно с:
@@ -114,8 +126,20 @@ sailwind_editor_windows.exe ui
 - **Сохранение файла** (автобэкап + дифф)
 - **Экспорт/импорт JSON**
 
-### Путь к сохранению по умолчанию (Steam Proton на Linux)
+### CLI
 
+```bash
+# Показать редактируемые поля
+./sailwind_editor_linux info [файл_сохранения]
+
+# Экспорт в JSON для ручного редактирования
+./sailwind_editor_linux dump [файл_сохранения]
+
+# Импорт из JSON
+./sailwind_editor_linux pack [файл_сохранения]
+```
+
+Путь к сохранению по умолчанию (Steam Proton на Linux):
 ```
 ~/.local/share/Steam/steamapps/compatdata/1764530/pfx/drive_c/users/steamuser/AppData/LocalLow/Raw Lion Workshop/Sailwind/slot0.save
 ```
