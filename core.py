@@ -148,7 +148,8 @@ def find_save_container_fields(data):
         elif bt == 7:
             rt = data[pos]
             if rt == 15:
-                pos += 4
+                pos += 1  # record type
+                pos += 4  # oid
                 cnt = struct.unpack_from('<i', data, pos)[0]; pos += 4
                 pt2 = data[pos]; pos += 1
                 pname2 = PRIM_NAMES.get(pt2, f'Prim{pt2}')
