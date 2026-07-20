@@ -36,6 +36,7 @@ jobs:
       - name: Build Linux
         run: |
           pyinstaller --clean --onefile --name sailwind_editor_linux \
+            --collect-all flet_desktop \
             --add-data "core.py:." \
             --add-data "ui.py:." \
             sailwind_editor.py
@@ -61,6 +62,7 @@ jobs:
         shell: pwsh
         run: |
           pyinstaller --clean --onefile --name sailwind_editor_windows.exe `
+            --collect-all flet_desktop `
             --add-data "core.py;." `
             --add-data "ui.py;." `
             sailwind_editor.py
