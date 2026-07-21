@@ -19,15 +19,82 @@ PRIM_NAMES = {1: 'Boolean', 7: 'Int16', 8: 'Int32', 9: 'Int64',
 
 KEY_FIELDS = [
     'playerCurrency',
+    'currencyRates',
+    'playerReputation',
+    'lastVisitedPort',
     'water',
     'food',
     'sleep',
     'time',
     'day',
-    'lastVisitedPort',
 ]
 
+SLIDER_FIELDS = [
+    'sleep',
+    'sleepDebt',
+    'food',
+    'foodDebt',
+    'water',
+    'waterDebt',
+    'tobaccoWhite',
+    'tobaccoGreen',
+    'tobaccoBlack',
+    'tobaccoBrown',
+    'protein',
+    'vitamins',
+    'alcohol'
+]
 
+CURRENCY_NAMES = {
+    0: 'Al\'Ankh Lions',
+    1: 'Emerald Dragons',
+    2: 'Aestrin Crowns',
+    3: 'Gold Lions'
+}
+
+REPUTATION_NAMES = {
+    0: 'Al\'Ankh',
+    1: 'Emerald Archipelago',
+    2: 'Aestrin',
+}
+
+PORT_NAMES = {  # placeholders, i will switch to real port names
+    0: 'Gold Rock City',
+    1: 'Al\'Nilem',
+    2: 'Neverdin',
+    3: 'Albacore Town',
+    4: 'Alchemist\'s Island',
+    5: 'Al\'Ankh Academy',
+    6: 'Oasis',
+    # 7: 'UNKNOWN',
+    # 8: 'UNKNOWN',
+    9: 'Dragon Cliffs',
+    10: 'Sanctuary',
+    11: 'Crab Beach',
+    12: 'New Port',
+    13: 'Sage Hills',
+    14: 'Serpent Isle',
+    15: 'Fort Aestrin',
+    16: 'Sunspire',
+    17: 'Mount Malefic',
+    18: 'Siren Song',
+    19: 'Eastwind',
+    20: 'Happy Bay',
+    21: 'Chronos',
+    22: 'Kicia Bay',
+    23: 'Fire Fish Town',
+    # 24: 'UNKNOWN',
+    25: 'Sen\'na',
+    26: 'Aestra Abbey',
+    27: 'Fey Valley',
+    28: 'Firefly Grotto',
+    29: 'Turtle Island',
+    30: 'Dead Cove',
+    31: 'Old Ankh Town',
+    32: 'Mirage Mountain',
+    # 33: 'UNKNOWN',
+    # 34: 'UNKNOWN'
+}
 
 def find_all_prim_arrays(data):
     arrays = {}
