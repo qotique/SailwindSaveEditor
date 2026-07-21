@@ -8,29 +8,48 @@ import flet as ft
 from core import KEY_FIELDS, SailwindSave
 
 
+MAIN_TITLE = "Sailwind Save Editor"
+SETTINGS_TITLE = "Settings"
+GO_TO_SETTINGS = "Go to Settings"
+SAFE_TO_EDIT = "Only safe fields"
+SAFE_TO_EDIT_DESCRIPTION = "Show only safe to edit fields."
+CHOOSE_THEME = "Theme"
+CHOOSE_LANGUAGE = "Language"
+DEFAULT_LANGUAGE = "English"
+
+
 class EditorApp:
     def __init__(self, page: ft.Page):
         self.page = page
         self.save: SailwindSave | None = None
         self.fields_data: list[dict] = []
         self.controls_cache: dict[str, ft.TextField] = {}
-        # also for future releases
         self.show_safe_fields_only: bool = True
-        self.selected_theme_mode = ft.ThemeMode.DARK
+        self.selected_theme_mode: str = "SYSTEM"
+        self.language: str = DEFAULT_LANGUAGE
+        self.is_path_selected: bool = False
 
         page.title = "Sailwind Save Editor"
-        page.theme_mode = self.selected_theme_mode
+        page.theme_mode = self.themes[self.selected_theme_mode]
         page.padding = 20
         page.window_min_width = 800
         page.window_min_height = 600
+        page.on_route_change = self.route_change
+        page.on_view_pop = self.view_pop
 
         self.file_picker = ft.FilePicker()
         self.build_ui()
+        self.route_change()
+
+        self.page.run_task(self._load_settings)
+
+    async def open_settings(self, e):
+        await self.page.push_route("/settings")
 
     def build_ui(self):
-        self.page.appbar = ft.AppBar(
-            title=ft.Text("Sailwind Save Editor", weight=ft.FontWeight.BOLD),
-            bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+        self.settings_btn = ft.Button(
+            GO_TO_SETTINGS,
+            on_click=self.open_settings,
         )
 
         self.path_text = ft.Text(
@@ -78,34 +97,178 @@ class EditorApp:
             disabled=True,
         )
         self.filter_toggle = ft.Switch(
-            label="Safe to edit fields only",
+            # label=SAFE_TO_EDIT,
             value=True,
             on_change=self.on_toggle_filter,
         )
 
-        header_row = ft.Row(
+        self.save_buttons_row = ft.Row(
             controls=[
                 self.load_btn,
                 self.save_btn,
-                ft.VerticalDivider(),
-                self.export_btn,
-                self.import_btn,
             ],
             spacing=10,
         )
-
-        self.page.add(
-            header_row,
-            self.filter_toggle,
-            self.path_text,
-            ft.Divider(),
-            ft.Text("Editable Fields", weight=ft.FontWeight.W_600, size=16),
-            self.fields_container,
-            self.status_bar,
+        self.json_buttons_row = ft.Row(
+            controls=[
+                self.export_btn,
+                self.import_btn,
+            ]
         )
+        # self.page.views.append(self.build_main_view())
+        # self.page.update()
 
-    def on_toggle_filter(self, e):
+    def build_main_view(self):
+        return ft.View(
+                route="/",
+                controls=[
+                    ft.AppBar(
+                        title=ft.Text(MAIN_TITLE, weight=ft.FontWeight.BOLD),
+                        bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                    ),
+                    self.settings_btn,
+                    self.save_buttons_row,
+                    self.path_text,
+                    self.fields_container if self.is_path_selected else ft.Container(),
+                    self.json_buttons_row if self.is_path_selected else ft.Container(),
+                    self.status_bar,
+                ]
+            )
+
+    def build_settings_view(self):
+        return ft.View(
+            route="/settings",
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            controls=[
+                ft.AppBar(
+                    title=ft.Text(SETTINGS_TITLE),
+                    bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                ),
+                ft.Text(SETTINGS_TITLE, theme_style=ft.TextThemeStyle.BODY_MEDIUM),
+                ft.Container(
+                    width=500,
+                    content=ft.ListTile(
+                        dense=True,
+                        title=ft.Text(SAFE_TO_EDIT_DESCRIPTION),
+                        trailing=self.filter_toggle,
+                    ),
+                ),
+                ft.Container(
+                    width=500,
+                    content=ft.ListTile(
+                        dense=True,
+                        title=ft.Text(CHOOSE_THEME),
+                        trailing=ft.Dropdown(
+                            width=180,
+                            leading_icon=ft.Icons.COLORIZE,
+                            value=self.selected_theme_mode,
+                            options=self.get_theme_options(),
+                            on_select=self.select_theme,
+                        ),
+                    ),
+                ),
+                ft.Container(
+                    width=500,
+                    content=ft.ListTile(
+                        dense=True,
+                        title=ft.Text("Language"),
+                        trailing=ft.Dropdown(
+                            width=180,
+                            value=self.language,
+                            options=self.get_language_options(),
+                            on_select=self.select_language,
+                        ),
+                    ),
+                ),
+            ]
+        )
+    
+    @property
+    def themes(self) -> dict[str, ft.ThemeMode]:
+        return {
+            "SYSTEM": ft.ThemeMode.SYSTEM,
+            "DARK": ft.ThemeMode.DARK,
+            "LIGHT": ft.ThemeMode.LIGHT
+        }
+
+    def get_theme_options(self) -> list[ft.DropdownOption]:
+        return [
+            ft.DropdownOption(key=key, text=key)
+            for key, value in self.themes.items()
+        ]
+
+    async def select_theme(self, e: ft.Event[ft.Dropdown]):
+        self.selected_theme_mode = e.control.value
+        self.page.theme_mode = self.themes[self.selected_theme_mode]
+        await self.page.shared_preferences.set("sailwind_editor.theme", self.selected_theme_mode)
+        self.page.update()
+
+    @property
+    def languages(self) -> list[str]:
+        return [
+            "English",
+            "Русский",
+            "Українська",
+        ]
+
+    def get_language_options(self) -> list[ft.DropdownOption]:
+        return [
+            ft.DropdownOption(key=language)
+            for language in self.languages
+        ]
+
+    async def select_language(self, e: ft.Event[ft.Dropdown]):
+        if e.control.value != "English":
+            alert = ft.AlertDialog(
+                title=ft.Text("Languages are not supported yet"),
+                content=ft.Text("Please check for updates."),
+                actions=[ft.TextButton("Dismiss", on_click=lambda _: self.page.pop_dialog())],
+                open=True,
+            )
+            self.page.show_dialog(alert)
+            e.control.value = "EN"
+            e.control.update()
+            return
+
+        self.language = e.control.value
+        await self.page.shared_preferences.set("sailwind_editor.language", self.language)
+        self.page.update()
+
+    async def _load_settings(self):
+        theme = await self.page.shared_preferences.get("sailwind_editor.theme")
+        if theme:
+            self.selected_theme_mode = theme
+            self.page.theme_mode = self.themes[theme]
+
+        show_safe_fields_only = await self.page.shared_preferences.get("sailwind_editor.show_safe_fields_only")
+        if show_safe_fields_only is not None:
+            self.show_safe_fields_only = show_safe_fields_only
+            self.filter_toggle.value = show_safe_fields_only
+
+        language = await self.page.shared_preferences.get("sailwind_editor.language")
+        if language:
+            self.language = language
+
+        if any([theme, show_safe_fields_only is not None, language]):
+            self.page.update()
+
+
+    def route_change(self):
+        self.page.views.clear()
+        self.page.views.append(self.build_main_view())
+        if self.page.route == "/settings":
+            self.page.views.append(self.build_settings_view())
+        self.page.update()
+
+    async def view_pop(self, e):
+        if e.view is not None:
+            self.page.views.remove(e.view)
+            top_view = self.page.views[-1]
+            await self.page.push_route(top_view.route)
+
+    async def on_toggle_filter(self, e):
         self.show_safe_fields_only = e.control.value
+        await self.page.shared_preferences.set("sailwind_editor.show_safe_fields_only", e.control.value)
         self.refresh_fields()
 
     def on_open_click(self, e):
@@ -125,6 +288,7 @@ class EditorApp:
         try:
             self.save = SailwindSave(path)
             self.path_text.value = os.path.abspath(path)
+            self.is_path_selected = True
             self.path_text.color = ft.Colors.PRIMARY
             self.fields_data = self.save.get_all_fields()
             self.refresh_fields()
@@ -136,6 +300,7 @@ class EditorApp:
                 f"{len(self.fields_data)} fields | "
                 f"{os.path.getsize(path)} bytes"
             )
+            self.route_change()
         except Exception as ex:
             self.status_bar.value = f"Error: {ex}"
             self.status_bar.color = ft.Colors.ERROR
