@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 """Sailwind Save Editor — Flet GUI."""
 
-import flet as ft
 import os
 
-from core import SailwindSave
+import flet as ft
 
-KEY_FIELDS = [
-    'playerGold', 'currentCurrency', 'water', 'food', 'sleep',
-    'sleepDebt', 'time', 'day', 'lastVisitedPort', 'gameVersion',
-]
+from core import KEY_FIELDS, SailwindSave
 
 
 class EditorApp:
@@ -18,9 +14,12 @@ class EditorApp:
         self.save: SailwindSave | None = None
         self.fields_data: list[dict] = []
         self.controls_cache: dict[str, ft.TextField] = {}
+        # also for future releases
+        self.show_safe_fields_only: bool = True
+        self.selected_theme_mode = ft.ThemeMode.DARK
 
         page.title = "Sailwind Save Editor"
-        page.theme_mode = ft.ThemeMode.DARK
+        page.theme_mode = self.selected_theme_mode
         page.padding = 20
         page.window_min_width = 800
         page.window_min_height = 600
@@ -78,6 +77,11 @@ class EditorApp:
             on_click=self.on_import_json,
             disabled=True,
         )
+        self.filter_toggle = ft.Switch(
+            label="Safe to edit fields only",
+            value=True,
+            on_change=self.on_toggle_filter,
+        )
 
         header_row = ft.Row(
             controls=[
@@ -92,12 +96,17 @@ class EditorApp:
 
         self.page.add(
             header_row,
+            self.filter_toggle,
             self.path_text,
             ft.Divider(),
             ft.Text("Editable Fields", weight=ft.FontWeight.W_600, size=16),
             self.fields_container,
             self.status_bar,
         )
+
+    def on_toggle_filter(self, e):
+        self.show_safe_fields_only = e.control.value
+        self.refresh_fields()
 
     def on_open_click(self, e):
         self.page.run_task(self._pick_file)
@@ -138,6 +147,8 @@ class EditorApp:
 
         for entry in self.fields_data:
             name = entry['name']
+            if self.show_safe_fields_only and name not in KEY_FIELDS:
+                continue
             val = entry['value']
             ptype = entry.get('type', '?')
             is_key = name in KEY_FIELDS

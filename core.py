@@ -17,6 +17,17 @@ PRIM_FMTS = {6: 'd', 7: 'h', 8: 'i', 9: 'q', 11: 'f', 15: 'I', 16: 'Q'}
 PRIM_NAMES = {1: 'Boolean', 7: 'Int16', 8: 'Int32', 9: 'Int64',
               11: 'Single', 15: 'UInt32', 16: 'UInt64'}
 
+KEY_FIELDS = [
+    'playerCurrency',
+    'water',
+    'food',
+    'sleep',
+    'time',
+    'day',
+    'lastVisitedPort',
+]
+
+
 
 def find_all_prim_arrays(data):
     arrays = {}
