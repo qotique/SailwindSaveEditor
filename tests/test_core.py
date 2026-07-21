@@ -1,9 +1,9 @@
-import os
 import json
-import struct
+import os
+
 import pytest
 
-from core import SailwindSave, find_save_container_fields, PRIM_FMTS, PRIM_SIZES
+from core import SailwindSave, find_save_container_fields
 
 
 class TestFindFields:

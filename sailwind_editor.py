@@ -8,10 +8,10 @@ Usage:
     python3 sailwind_editor.py ui   [save_file]      - Launch GUI
 """
 
-import sys
 import os
+import sys
 
-from core import SailwindSave, DEFAULT_SAVE, PRIM_NAMES, PRIM_FMTS
+from core import DEFAULT_SAVE, KEY_FIELDS, SailwindSave
 
 
 def cmd_dump(save_path):
@@ -19,8 +19,7 @@ def cmd_dump(save_path):
     path = save.export_json()
     print(f"Exported {len(save.field_map)} fields to {path}")
     print("\nKey fields:")
-    for n in ['playerGold', 'currentCurrency', 'water', 'food', 'sleep',
-              'sleepDebt', 'time', 'day', 'lastVisitedPort', 'gameVersion']:
+    for n in KEY_FIELDS:
         if n in save.field_map:
             val = save.get_field_value(n)
             print(f"  {n:22s}: {val}")
@@ -38,11 +37,12 @@ def cmd_pack(save_path):
 
 def cmd_info(save_path):
     save = SailwindSave(save_path)
-    fmt_name = "{:<22s} {:>30s}  {:8s}  {:>7s}"
     print("=== Editable fields ===\n")
     print(f"{'Name':22s} {'Value':>14s}  {'Type':8s}  {'Offset':>7s}")
     print("-" * 60)
     for entry in save.get_all_fields():
+        if entry['name'] not in KEY_FIELDS:
+            continue
         val = entry['value']
         val_s = str(val)
         if isinstance(val, float):
