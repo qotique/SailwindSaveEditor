@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """Sailwind Save Editor — Flet GUI."""
 
+import asyncio
 import os
+import json
+import urllib.request
+import webbrowser
 
 import flet as ft
 
-from core import KEY_FIELDS, SailwindSave
+from core import KEY_FIELDS, SailwindSave, CURRENCY_NAMES, PORT_NAMES, SLIDER_FIELDS, REPUTATION_NAMES
 
+
+VERSION = "1.0.4"
 
 MAIN_TITLE = "Sailwind Save Editor"
 SETTINGS_TITLE = "Settings"
@@ -16,6 +22,7 @@ SAFE_TO_EDIT_DESCRIPTION = "Show only safe to edit fields."
 CHOOSE_THEME = "Theme"
 CHOOSE_LANGUAGE = "Language"
 DEFAULT_LANGUAGE = "English"
+CHECK_UPDATES = "Check updates on startup"
 
 
 class EditorApp:
@@ -23,7 +30,7 @@ class EditorApp:
         self.page = page
         self.save: SailwindSave | None = None
         self.fields_data: list[dict] = []
-        self.controls_cache: dict[str, ft.TextField] = {}
+        self.controls_cache: dict[str, ft.Control] = {}
         self.show_safe_fields_only: bool = True
         self.selected_theme_mode: str = "SYSTEM"
         self.language: str = DEFAULT_LANGUAGE
@@ -102,21 +109,24 @@ class EditorApp:
             on_change=self.on_toggle_filter,
         )
 
-        self.save_buttons_row = ft.Row(
+        self.check_updates_toggle = ft.Switch(
+            value=True,
+            on_change=self.on_toggle_check_updates,
+        )
+
+        self.load_button_row = ft.Row(
             controls=[
                 self.load_btn,
-                self.save_btn,
+                self.import_btn
             ],
             spacing=10,
         )
-        self.json_buttons_row = ft.Row(
+        self.save_buttons_row = ft.Row(
             controls=[
+                self.save_btn,
                 self.export_btn,
-                self.import_btn,
             ]
         )
-        # self.page.views.append(self.build_main_view())
-        # self.page.update()
 
     def build_main_view(self):
         return ft.View(
@@ -127,10 +137,10 @@ class EditorApp:
                         bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
                     ),
                     self.settings_btn,
-                    self.save_buttons_row,
+                    self.load_button_row,
                     self.path_text,
                     self.fields_container if self.is_path_selected else ft.Container(),
-                    self.json_buttons_row if self.is_path_selected else ft.Container(),
+                    self.save_buttons_row if self.is_path_selected else ft.Container(),
                     self.status_bar,
                 ]
             )
@@ -180,9 +190,20 @@ class EditorApp:
                         ),
                     ),
                 ),
+                ft.Container(
+                    width=500,
+                    content=ft.ListTile(
+                        dense=True,
+                        title=ft.Text(CHECK_UPDATES),
+                        trailing=self.check_updates_toggle,
+                    )
+                )
             ]
         )
-    
+
+    async def on_toggle_check_updates(self, e):
+        await self.page.shared_preferences.set("sailwind_editor.check_updates", e.control.value)
+
     @property
     def themes(self) -> dict[str, ft.ThemeMode]:
         return {
@@ -235,6 +256,10 @@ class EditorApp:
         self.page.update()
 
     async def _load_settings(self):
+        check_updates = await self.page.shared_preferences.get("sailwind_editor.check_updates")
+        if check_updates is not None:
+            self.check_updates_toggle.value = check_updates
+
         theme = await self.page.shared_preferences.get("sailwind_editor.theme")
         if theme:
             self.selected_theme_mode = theme
@@ -249,8 +274,11 @@ class EditorApp:
         if language:
             self.language = language
 
-        if any([theme, show_safe_fields_only is not None, language]):
+        if any([check_updates is not None, theme, show_safe_fields_only is not None, language]):
             self.page.update()
+
+        if self.check_updates_toggle.value:
+            await self.check_for_updates()
 
 
     def route_change(self):
@@ -317,11 +345,100 @@ class EditorApp:
             val = entry['value']
             ptype = entry.get('type', '?')
             is_key = name in KEY_FIELDS
+            match name:
+                case 'playerCurrency':
+                    self._render_player_currency(value=val)
+                    continue
+                case 'currencyRates':
+                    self._render_currency_rates(value=val)
+                    continue
+                case 'playerReputation':
+                    self._render_player_reputation(value=val)
+                    continue
+                case 'lastVisitedPort':
+                    self._render_last_visited_port(value=val)
+                    continue
 
             row = self._build_field_row(name, val, ptype, is_key)
             self.fields_column.controls.append(row)
 
         self.page.update()
+
+    def _render_field_group(self, title: str, names: list[str], values, cache_prefix: str, count: int):
+        rows = [
+            ft.Row(controls=[ft.Text(title)]),
+        ]
+        for i in range(count):
+            label = ft.Text(
+                names[i],
+                weight=ft.FontWeight.BOLD,
+                width=200,
+                color=ft.Colors.PRIMARY,
+            )
+            field = ft.TextField(
+                value=str(values[i]),
+                width=300,
+                height=40,
+                text_size=13,
+            )
+            type_badge = ft.Container(
+                content=ft.Text("Int32", size=10, color=ft.Colors.ON_SECONDARY_CONTAINER),
+                bgcolor=ft.Colors.SECONDARY_CONTAINER,
+                padding=ft.Padding.symmetric(horizontal=6, vertical=2),
+                border_radius=4,
+            )
+            self.controls_cache[f'{cache_prefix}{i}'] = field
+            rows.append(
+                ft.Row(
+                    controls=[label, field, type_badge],
+                    spacing=8,
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                )
+            )
+        col = ft.Column(spacing=4, controls=rows)
+        container = ft.Container(
+            content=col,
+            padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+        )
+        self.fields_column.controls.append(container)
+        
+    def _render_player_currency(self, value):
+        self._render_field_group("Currency", CURRENCY_NAMES, value, "playerCurrency_", 4)
+
+    def _render_currency_rates(self, value):
+        self._render_field_group("Currency Rates", CURRENCY_NAMES, value, "currencyRates_", 4)
+
+    def _render_player_reputation(self, value):
+        self._render_field_group("Reputation", REPUTATION_NAMES, value, "playerReputation_", 3)
+
+    def _render_last_visited_port(self, value):
+        label = ft.Text(
+            "lastVisitedPort",
+            weight=ft.FontWeight.BOLD,
+            width=200,
+            color=ft.Colors.PRIMARY,
+        )
+        type_badge = ft.Container(
+            content=ft.Text("Int32", size=10, color=ft.Colors.ON_SECONDARY_CONTAINER),
+            bgcolor=ft.Colors.SECONDARY_CONTAINER,
+            padding=ft.Padding.symmetric(horizontal=6, vertical=2),
+            border_radius=4,
+        )
+        dropdown = ft.Dropdown(
+            width=300,
+            value=str(value),
+            options=[
+                ft.DropdownOption(key=str(k), text=v)
+                for k, v in PORT_NAMES.items()
+            ],
+        )
+        self.controls_cache['lastVisitedPort'] = dropdown
+        row = ft.Row(
+            controls=[label, dropdown, type_badge],
+            spacing=8,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        self.fields_column.controls.append(row)
 
     def _build_field_row(self, name: str, val, ptype: str, is_key: bool):
         label = ft.Text(
@@ -339,12 +456,22 @@ class EditorApp:
         )
 
         val_str = self._format_value(val)
-        input_field = ft.TextField(
-            value=val_str,
-            width=300,
-            height=40,
-            text_size=13,
-        )
+        if name in SLIDER_FIELDS:
+            input_field = ft.Slider(
+                min=0,
+                max=100,
+                value=float(val),
+                label="{value}",
+                round=1,
+                divisions=100,
+            )
+        else:
+            input_field = ft.TextField(
+                value=val_str,
+                width=300,
+                height=40,
+                text_size=13,
+            )
         self.controls_cache[name] = input_field
 
         return ft.Row(
@@ -387,8 +514,53 @@ class EditorApp:
 
     def collect_values(self) -> list[tuple[str, any]]:
         result = []
+
+        curr_values = []
+        for i in range(4):
+            ctrl = self.controls_cache.get(f'playerCurrency_{i}')
+            if ctrl is not None:
+                try:
+                    curr_values.append(int(ctrl.value))
+                except ValueError:
+                    curr_values.append(0)
+        if curr_values:
+            result.append(('playerCurrency', curr_values))
+
+        rep_values = []
+        for i in range(3):
+            ctrl = self.controls_cache.get(f'playerReputation_{i}')
+            if ctrl is not None:
+                try:
+                    rep_values.append(int(ctrl.value))
+                except ValueError:
+                    rep_values.append(0)
+        if rep_values:
+            result.append(('playerReputation', rep_values))
+
+        rate_values = []
+        for i in range(4):
+            ctrl = self.controls_cache.get(f'currencyRates_{i}')
+            if ctrl is not None:
+                try:
+                    rate_values.append(float(ctrl.value))
+                except ValueError:
+                    rate_values.append(0.0)
+        if rate_values:
+            result.append(('currencyRates', rate_values))
+
         for entry in self.fields_data:
             name = entry['name']
+
+            if name == 'lastVisitedPort':
+                ctrl = self.controls_cache.get(name)
+                if ctrl is not None:
+                    result.append((name, ctrl.value))
+                    # for k, v in PORT_NAMES.items():
+                    #     if v == ctrl.value:
+                    #         result.append((name, k))
+                    #         break
+                continue
+
             ctrl = self.controls_cache.get(name)
             if ctrl is None:
                 continue
@@ -397,6 +569,7 @@ class EditorApp:
                 result.append((name, parsed))
             except (ValueError, TypeError):
                 pass
+
         return result
 
     def on_save(self, e):
@@ -447,6 +620,103 @@ class EditorApp:
             self.status_bar.value = f"Import error: {ex}"
             self.status_bar.color = ft.Colors.ERROR
         self.page.update()
+
+    async def check_for_updates(self, show_up_to_date=False):
+        try:
+            url = "https://api.github.com/repos/qotique/SailwindSaveEditor/releases/latest"
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(
+                None, lambda: urllib.request.urlopen(url, timeout=10)
+            )
+            data = json.loads(response.read().decode())
+            latest_tag = data.get("tag_name", "")
+            latest = latest_tag.lstrip("v")
+
+            current_parts = [int(x) for x in VERSION.split(".")]
+            latest_parts = [int(x) for x in latest.split(".")]
+
+            if latest_parts > current_parts:
+                release_notes = data.get("body")
+                if not release_notes:
+                    release_notes = await self._fetch_commit_message(latest_tag)
+                await self._show_update_dialog(
+                    latest_tag,
+                    data.get("html_url", ""),
+                    release_notes or "",
+                )
+            elif show_up_to_date:
+                await self._show_up_to_date_dialog()
+        except Exception as ex:
+            if show_up_to_date:
+                await self._show_error_dialog(str(ex))
+
+    async def _fetch_commit_message(self, tag_name):
+        try:
+            loop = asyncio.get_running_loop()
+            url = f"https://api.github.com/repos/qotique/SailwindSaveEditor/git/ref/tags/{tag_name}"
+            ref_resp = await loop.run_in_executor(
+                None, lambda: urllib.request.urlopen(url, timeout=10)
+            )
+            sha = json.loads(ref_resp.read().decode())["object"]["sha"]
+
+            url = f"https://api.github.com/repos/qotique/SailwindSaveEditor/git/commits/{sha}"
+            commit_resp = await loop.run_in_executor(
+                None, lambda: urllib.request.urlopen(url, timeout=10)
+            )
+            return json.loads(commit_resp.read().decode()).get("message", "")
+        except Exception:
+            return None
+
+    async def _show_update_dialog(self, latest_tag, release_url, release_notes):
+        notes_text = (
+            release_notes
+            if release_notes
+            else "No release notes provided with this release.\n"
+                 "See the release page on GitHub for details."
+        )
+        alert = ft.AlertDialog(
+            title=ft.Text(f"Update Available: {latest_tag}"),
+            content=ft.Text(
+                f"Current version: v{VERSION}\n"
+                f"Latest version: {latest_tag}\n\n"
+                f"--- Release Notes ---\n\n"
+                f"{notes_text}",
+                selectable=True,
+            ),
+            actions=[
+                ft.TextButton(
+                    "Download",
+                    on_click=lambda _: (
+                        webbrowser.open(release_url),
+                        self.page.pop_dialog(),
+                    ),
+                ),
+                ft.TextButton(
+                    "Dismiss",
+                    on_click=lambda _: self.page.pop_dialog(),
+                ),
+            ],
+            open=True,
+        )
+        self.page.show_dialog(alert)
+
+    async def _show_up_to_date_dialog(self):
+        alert = ft.AlertDialog(
+            title=ft.Text("No Updates"),
+            content=ft.Text(f"You have the latest version (v{VERSION})."),
+            actions=[ft.TextButton("OK", on_click=lambda _: self.page.pop_dialog())],
+            open=True,
+        )
+        self.page.show_dialog(alert)
+
+    async def _show_error_dialog(self, error_msg):
+        alert = ft.AlertDialog(
+            title=ft.Text("Check Failed"),
+            content=ft.Text(f"Could not check for updates:\n{error_msg}"),
+            actions=[ft.TextButton("OK", on_click=lambda _: self.page.pop_dialog())],
+            open=True,
+        )
+        self.page.show_dialog(alert)
 
 
 def main():
