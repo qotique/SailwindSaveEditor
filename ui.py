@@ -10,19 +10,11 @@ import webbrowser
 import flet as ft
 
 from core import KEY_FIELDS, SailwindSave, CURRENCY_NAMES, PORT_NAMES, SLIDER_FIELDS, REPUTATION_NAMES
-
+from translations import Strings
 
 VERSION = "1.0.4"
 
-MAIN_TITLE = "Sailwind Save Editor"
-SETTINGS_TITLE = "Settings"
-GO_TO_SETTINGS = "Go to Settings"
-SAFE_TO_EDIT = "Only safe fields"
-SAFE_TO_EDIT_DESCRIPTION = "Show only safe to edit fields."
-CHOOSE_THEME = "Theme"
-CHOOSE_LANGUAGE = "Language"
 DEFAULT_LANGUAGE = "English"
-CHECK_UPDATES = "Check updates on startup"
 
 
 class EditorApp:
@@ -36,7 +28,7 @@ class EditorApp:
         self.language: str = DEFAULT_LANGUAGE
         self.is_path_selected: bool = False
 
-        page.title = "Sailwind Save Editor"
+        page.title = Strings.MainTitle[self.language]
         page.theme_mode = self.themes[self.selected_theme_mode]
         page.padding = 20
         page.window_min_width = 800
@@ -55,16 +47,18 @@ class EditorApp:
 
     def build_ui(self):
         self.settings_btn = ft.Button(
-            GO_TO_SETTINGS,
+            Strings.OpenSettings[self.language],
             on_click=self.open_settings,
         )
 
         self.path_text = ft.Text(
-            "No file selected", italic=True, color=ft.Colors.OUTLINE
+            Strings.NoFileSelected[self.language],
+            italic=True,
+            color=ft.Colors.OUTLINE,
         )
 
-        self.load_btn = ft.ElevatedButton(
-            "Open Save File",
+        self.load_btn = ft.Button(
+            Strings.OpenSaveFile[self.language],
             icon=ft.Icons.FOLDER_OPEN,
             on_click=self.on_open_click,
         )
@@ -85,20 +79,20 @@ class EditorApp:
             border_radius=8,
         )
 
-        self.save_btn = ft.ElevatedButton(
-            "Save File",
+        self.save_btn = ft.Button(
+            Strings.SaveFile[self.language],
             icon=ft.Icons.SAVE,
             on_click=self.on_save,
             disabled=True,
         )
-        self.export_btn = ft.ElevatedButton(
-            "Export JSON",
+        self.export_btn = ft.Button(
+            Strings.ExportJSON[self.language],
             icon=ft.Icons.FILE_DOWNLOAD,
             on_click=self.on_export_json,
             disabled=True,
         )
-        self.import_btn = ft.ElevatedButton(
-            "Import JSON",
+        self.import_btn = ft.Button(
+            Strings.ImportJSON[self.language],
             icon=ft.Icons.FILE_UPLOAD,
             on_click=self.on_import_json,
             disabled=True,
@@ -133,7 +127,9 @@ class EditorApp:
                 route="/",
                 controls=[
                     ft.AppBar(
-                        title=ft.Text(MAIN_TITLE, weight=ft.FontWeight.BOLD),
+                        title=ft.Text(
+                        Strings.MainTitle[self.language],
+                        weight=ft.FontWeight.BOLD),
                         bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
                     ),
                     self.settings_btn,
@@ -151,15 +147,18 @@ class EditorApp:
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             controls=[
                 ft.AppBar(
-                    title=ft.Text(SETTINGS_TITLE),
+                    title=ft.Text(Strings.SettingsTitle[self.language]),
                     bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
                 ),
-                ft.Text(SETTINGS_TITLE, theme_style=ft.TextThemeStyle.BODY_MEDIUM),
+                ft.Text(
+                    Strings.SettingsTitle[self.language],
+                    theme_style=ft.TextThemeStyle.BODY_MEDIUM,
+                ),
                 ft.Container(
                     width=500,
                     content=ft.ListTile(
                         dense=True,
-                        title=ft.Text(SAFE_TO_EDIT_DESCRIPTION),
+                        title=ft.Text(Strings.SafeToEditDescription[self.language]),
                         trailing=self.filter_toggle,
                     ),
                 ),
@@ -167,7 +166,9 @@ class EditorApp:
                     width=500,
                     content=ft.ListTile(
                         dense=True,
-                        title=ft.Text(CHOOSE_THEME),
+                        title=ft.Text(
+                            Strings.ChooseTheme[self.language],
+                        ),
                         trailing=ft.Dropdown(
                             width=180,
                             leading_icon=ft.Icons.COLORIZE,
@@ -181,7 +182,7 @@ class EditorApp:
                     width=500,
                     content=ft.ListTile(
                         dense=True,
-                        title=ft.Text("Language"),
+                        title=ft.Text(Strings.ChooseLanguage[self.language]),
                         trailing=ft.Dropdown(
                             width=180,
                             value=self.language,
@@ -194,7 +195,7 @@ class EditorApp:
                     width=500,
                     content=ft.ListTile(
                         dense=True,
-                        title=ft.Text(CHECK_UPDATES),
+                        title=ft.Text(Strings.CheckUpdates[self.language]),
                         trailing=self.check_updates_toggle,
                     )
                 )
@@ -239,21 +240,26 @@ class EditorApp:
         ]
 
     async def select_language(self, e: ft.Event[ft.Dropdown]):
-        if e.control.value != "English":
+        last_language_selected = self.language
+        if e.control.value not in ("English", "Русский"):
             alert = ft.AlertDialog(
-                title=ft.Text("Languages are not supported yet"),
-                content=ft.Text("Please check for updates."),
-                actions=[ft.TextButton("Dismiss", on_click=lambda _: self.page.pop_dialog())],
+                title=ft.Text(e.control.value + Strings.LanguageNotSupportedYetTitle[self.language]),
+                content=ft.Text(Strings.LanguageNotSupportedYetDescription[self.language]),
+                actions=[ft.TextButton(Strings.Dismiss[self.language], on_click=lambda _: self.page.pop_dialog())],
                 open=True,
             )
             self.page.show_dialog(alert)
-            e.control.value = "EN"
+            e.control.value = self.language
             e.control.update()
+            self.page.update()
             return
 
         self.language = e.control.value
         await self.page.shared_preferences.set("sailwind_editor.language", self.language)
-        self.page.update()
+        self.update_ui_texts()
+        self.route_change()
+        if self.save:
+            self.refresh_fields()
 
     async def _load_settings(self):
         check_updates = await self.page.shared_preferences.get("sailwind_editor.check_updates")
@@ -271,15 +277,29 @@ class EditorApp:
             self.filter_toggle.value = show_safe_fields_only
 
         language = await self.page.shared_preferences.get("sailwind_editor.language")
-        if language:
+        if language and language != self.language:
             self.language = language
-
-        if any([check_updates is not None, theme, show_safe_fields_only is not None, language]):
+            self.update_ui_texts()
+            self.route_change()
+            if self.save:
+                self.refresh_fields()
+        elif any([check_updates is not None, theme, show_safe_fields_only is not None, language]):
             self.page.update()
 
         if self.check_updates_toggle.value:
             await self.check_for_updates()
 
+    def update_ui_texts(self):
+        self.settings_btn.content = Strings.OpenSettings[self.language]
+        self.load_btn.content = Strings.OpenSaveFile[self.language]
+        self.import_btn.content = Strings.ImportJSON[self.language]
+        self.save_btn.content = Strings.SaveFile[self.language]
+        self.export_btn.content = Strings.ExportJSON[self.language]
+
+        if not self.is_path_selected:
+            self.path_text.value = Strings.NoFileSelected[self.language]
+
+        self.page.title = Strings.MainTitle[self.language]
 
     def route_change(self):
         self.page.views.clear()
@@ -304,7 +324,7 @@ class EditorApp:
 
     async def _pick_file(self):
         files = await self.file_picker.pick_files(
-            dialog_title="Select Sailwind save file",
+            dialog_title=Strings.SelectSaveFile[self.language],
             allow_multiple=False,
             file_type=ft.FilePickerFileType.CUSTOM,
             allowed_extensions=['save'],
@@ -329,6 +349,7 @@ class EditorApp:
                 f"{os.path.getsize(path)} bytes"
             )
             self.route_change()
+            return
         except Exception as ex:
             self.status_bar.value = f"Error: {ex}"
             self.status_bar.color = ft.Colors.ERROR
@@ -671,28 +692,27 @@ class EditorApp:
         notes_text = (
             release_notes
             if release_notes
-            else "No release notes provided with this release.\n"
-                 "See the release page on GitHub for details."
+            else Strings.NoReleaseNotesProvided[self.language]
         )
         alert = ft.AlertDialog(
             title=ft.Text(f"Update Available: {latest_tag}"),
             content=ft.Text(
-                f"Current version: v{VERSION}\n"
-                f"Latest version: {latest_tag}\n\n"
+                f"{Strings.CurrentVersion[self.language]}: v{VERSION}\n"
+                f"{Strings.LatestVersion[self.language]}: {latest_tag}\n\n"
                 f"--- Release Notes ---\n\n"
                 f"{notes_text}",
                 selectable=True,
             ),
             actions=[
                 ft.TextButton(
-                    "Download",
+                    Strings.Download[self.language],
                     on_click=lambda _: (
                         webbrowser.open(release_url),
                         self.page.pop_dialog(),
                     ),
                 ),
                 ft.TextButton(
-                    "Dismiss",
+                    Strings.Dismiss[self.language],
                     on_click=lambda _: self.page.pop_dialog(),
                 ),
             ],
@@ -711,7 +731,7 @@ class EditorApp:
 
     async def _show_error_dialog(self, error_msg):
         alert = ft.AlertDialog(
-            title=ft.Text("Check Failed"),
+            title=ft.Text(Strings.CheckFailed[self.language]),
             content=ft.Text(f"Could not check for updates:\n{error_msg}"),
             actions=[ft.TextButton("OK", on_click=lambda _: self.page.pop_dialog())],
             open=True,
