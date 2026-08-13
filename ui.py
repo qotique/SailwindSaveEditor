@@ -42,7 +42,7 @@ from widgets import (
     Widget,
 )
 
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 DEFAULT_LANGUAGE = "English"
 

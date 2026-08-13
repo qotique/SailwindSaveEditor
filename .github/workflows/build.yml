@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller pygame-ce nrbf
+          pip install pyinstaller pygame-ce nrbf numpy
       - name: Build Linux
         run: |
           pyinstaller --clean --onefile --name sailwind_editor_linux \
@@ -41,7 +41,9 @@ jobs:
             --add-data "widgets.py:." \
             --add-data "translations.py:." \
             --add-data "grass.py:." \
+            --add-data "watershader.py:." \
             --add-data "grass_assets:grass_assets" \
+            --hidden-import numpy \
             sailwind_editor.py
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
@@ -60,7 +62,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller pygame-ce nrbf
+          pip install pyinstaller pygame-ce nrbf numpy
       - name: Build Windows
         shell: pwsh
         run: |
@@ -70,7 +72,9 @@ jobs:
             --add-data "widgets.py;." `
             --add-data "translations.py;." `
             --add-data "grass.py;." `
+            --add-data "watershader.py;." `
             --add-data "grass_assets;grass_assets" `
+            --hidden-import numpy `
             sailwind_editor.py
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
