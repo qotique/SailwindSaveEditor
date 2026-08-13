@@ -23,19 +23,17 @@ def _lps(s: str) -> bytes:
 def make_mock_save(fields):
     buf = bytearray()
 
-    # SerializationHeader (17 bytes)
     buf.extend(b'\x00')
-    buf.extend(struct.pack('<I', 3))  # rootId
-    buf.extend(struct.pack('<I', 1))  # headerId
-    buf.extend(struct.pack('<I', 1))  # major
-    buf.extend(struct.pack('<I', 0))  # minor
+    buf.extend(struct.pack('<I', 3))  
+    buf.extend(struct.pack('<I', 1))  
+    buf.extend(struct.pack('<I', 1))  
+    buf.extend(struct.pack('<I', 0))  
 
     lib_id = 2
     buf.extend(b'\x0c')
     buf.extend(struct.pack('<I', lib_id))
     buf.extend(_lps("mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089"))
 
-    # ClassWithMembersAndTypes: SaveContainer
     buf.extend(b'\x05')
     buf.extend(struct.pack('<I', 3))
     buf.extend(_lps("SaveContainer"))

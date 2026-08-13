@@ -1,12 +1,12 @@
 # Sailwind Save Editor
 
-Cross-platform save file editor for the game **Sailwind** (Steam App ID 1764530). Built with Python and [Flet](https://flet.dev/) for native desktop UI (Windows, Linux).
+Cross-platform save file editor for the game **Sailwind** (Steam App ID 1764530). Built with Python and [pygame](https://www.pygame.org/) for native desktop UI (Windows, Linux).
 
 ---
 
 # Редактор сохранений Sailwind
 
-Кроссплатформенный редактор файлов сохранений для игры **Sailwind** (Steam App ID 1764530). Написан на Python с использованием [Flet](https://flet.dev/) для нативного интерфейса на Windows и Linux.
+Кроссплатформенный редактор файлов сохранений для игры **Sailwind** (Steam App ID 1764530). Написан на Python с использованием [pygame](https://www.pygame.org/) для нативного интерфейса на Windows и Linux.
 
 ## Features
 
@@ -45,7 +45,7 @@ chmod +x sailwind_editor_linux
 ### From Source
 
 ```bash
-pip install flet nrbf
+pip install pygame-ce nrbf
 python3 sailwind_editor.py ui
 ```
 
@@ -68,7 +68,7 @@ chmod +x sailwind_editor_linux
 ### Из исходников
 
 ```bash
-pip install flet nrbf
+pip install pygame nrbf
 python3 sailwind_editor.py ui
 ```
 
@@ -149,7 +149,8 @@ sailwind_editor_windows.exe
 ```
 sailwind_editor/
 ├── core.py              # Core binary patching logic (SailwindSave class)
-├── ui.py                # Flet GUI application
+├── widgets.py           # Custom pygame widget toolkit (labels, fields, sliders...)
+├── ui.py                # pygame GUI application
 ├── sailwind_editor.py   # CLI entry point (dump/pack/info/ui)
 ├── tests/
 │   ├── conftest.py      # Test fixtures (mock save generator)
@@ -162,7 +163,8 @@ sailwind_editor/
 ```
 sailwind_editor/
 ├── core.py              # Ядро: бинарный патчинг (класс SailwindSave)
-├── ui.py                # GUI на Flet
+├── widgets.py           # Тулкит виджетов на pygame (лейблы, поля, слайдеры...)
+├── ui.py                # GUI на pygame
 ├── sailwind_editor.py   # CLI точка входа (dump/pack/info/ui)
 ├── tests/
 │   ├── conftest.py      # Фикстуры тестов (генератор мок-сохранений)
@@ -173,13 +175,15 @@ sailwind_editor/
 ## Architecture
 
 - **core.py** — Pure Python, no GUI dependencies. Parses .NET BinaryFormatter (NRBF) save files, finds field offsets, patches binary data in-place.
-- **ui.py** — Flet-based GUI. Uses `FilePicker` for file selection, `TextField` for inline editing. Runs on desktop.
+- **widgets.py** — Custom pygame widget toolkit: buttons, text fields, sliders, dropdowns, switches, scroll area and modal dialogs. Includes a font manager with Cyrillic support and light/dark palettes.
+- **ui.py** — pygame GUI. Uses a native file dialog via tkinter for file selection, inline editing widgets. Runs on desktop.
 - **sailwind_editor.py** — Thin CLI wrapper reusing core logic.
 
 ## Архитектура
 
 - **core.py** — Чистый Python, без GUI-зависимостей. Парсит .NET BinaryFormatter (NRBF), находит смещения полей, патчит бинарные данные inplace.
-- **ui.py** — GUI на Flet. Использует `FilePicker` для выбора файла, `TextField` для inline-редактирования. Работает на десктопе.
+- **widgets.py** — Собственный тулкит виджетов на pygame: кнопки, текстовые поля, слайдеры, выпадающие списки, переключатели, скролл-область и модальные диалоги. Включает менеджер шрифтов с поддержкой кириллицы и светлую/тёмную палитру.
+- **ui.py** — GUI на pygame. Использует нативный файловый диалог (tkinter) для выбора файла и виджеты inline-редактирования. Работает на десктопе.
 - **sailwind_editor.py** — Тонкая CLI-обёртка, переиспользующая логику core.
 
 ## Testing
@@ -221,9 +225,11 @@ MIT License — см. [LICENSE](LICENSE).
 ## Credits
 
 - NRBF parsing via [`nrbf`](https://pypi.org/project/nrbf/) by @vickas
-- UI via [Flet](https://flet.dev/) (Flutter-powered Python framework)
+- UI via [pygame](https://www.pygame.org/) (custom widget toolkit in `widgets.py`)
+- Grass easter egg via [pygame-grass](https://github.com/DaFluffyPotato/pygame-grass) by DaFluffyPotato (embedded in `grass.py` + `grass_assets/`)
 
 ## Благодарности
 
 - Парсинг NRBF через [`nrbf`](https://pypi.org/project/nrbf/) от @vickas
-- UI через [Flet](https://flet.dev/) (Flutter-powered Python framework)
+- UI через [pygame](https://www.pygame.org/) (собственный тулкит виджетов в `widgets.py`)
+- Пасхалка с травой на основе [pygame-grass](https://github.com/DaFluffyPotato/pygame-grass) от DaFluffyPotato (встроено в `grass.py` + `grass_assets/`)

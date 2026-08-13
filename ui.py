@@ -1,588 +1,687 @@
 #!/usr/bin/env python3
-"""Sailwind Save Editor — Flet GUI."""
+"""Sailwind Save Editor — pygame GUI.
 
-import asyncio
-import os
+Replaces the previous Flet interface with a lightweight custom pygame
+widget toolkit (see widgets.py). All business logic lives in core.py and
+is untouched by this migration.
+"""
+
 import json
+import os
+import queue
+import threading
 import urllib.request
 import webbrowser
 
-import flet as ft
+import pygame
 
-from core import KEY_FIELDS, SailwindSave, CURRENCY_NAMES, PORT_NAMES, SLIDER_FIELDS, REPUTATION_NAMES
+from core import (
+    KEY_FIELDS,
+    SailwindSave,
+    CURRENCY_NAMES,
+    PORT_NAMES,
+    SLIDER_FIELDS,
+    REPUTATION_NAMES,
+)
 from translations import Strings
+from widgets import (
+    AppBase,
+    Button,
+    Dialog,
+    Dropdown,
+    GrassArea,
+    Label,
+    PALETTES,
+    Panel,
+    PlaceholderText,
+    ScrollArea,
+    Slider,
+    Switch,
+    TextField,
+    Theme,
+    Widget,
+)
 
-VERSION = "1.0.4"
+VERSION = "2.0.0"
 
 DEFAULT_LANGUAGE = "English"
 
+CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".sailwind_editor.json")
 
-class EditorApp:
-    def __init__(self, page: ft.Page):
-        self.page = page
-        self.save: SailwindSave | None = None
-        self.fields_data: list[dict] = []
-        self.controls_cache: dict[str, ft.Control] = {}
-        self.show_safe_fields_only: bool = True
-        self.selected_theme_mode: str = "SYSTEM"
-        self.language: str = DEFAULT_LANGUAGE
-        self.is_path_selected: bool = False
 
-        page.title = Strings.MainTitle[self.language]
-        page.theme_mode = self.themes[self.selected_theme_mode]
-        page.padding = 20
-        page.window_min_width = 800
-        page.window_min_height = 600
-        page.on_route_change = self.route_change
-        page.on_view_pop = self.view_pop
 
-        self.file_picker = ft.FilePicker()
-        self.build_ui()
-        self.route_change()
 
-        self.page.run_task(self._load_settings)
+class Config:
+    """Very small JSON-backed key/value store (replaces page.shared_preferences)."""
 
-    async def open_settings(self, e):
-        await self.page.push_route("/settings")
+    def __init__(self):
+        self.data = self._load()
 
-    def build_ui(self):
-        self.settings_btn = ft.Button(
-            Strings.OpenSettings[self.language],
-            on_click=self.open_settings,
+    def _load(self):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def get(self, key, default=None):
+        return self.data.get(key, default)
+
+    def set(self, key, value):
+        self.data[key] = value
+        self._save()
+
+    def _save(self):
+        try:
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(self.data, f, indent=2)
+        except Exception:
+            pass
+
+
+def pick_save_file(title):
+    """Native file dialog via tkinter (blocking, like the old flet FilePicker)."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes("-topmost", 1)
+        path = filedialog.askopenfilename(
+            title=title,
+            filetypes=[("Sailwind saves", "*.save"), ("All files", "*.*")],
         )
+        root.destroy()
+        return path or None
+    except Exception:
+        return None
 
-        self.path_text = ft.Text(
-            Strings.NoFileSelected[self.language],
-            italic=True,
-            color=ft.Colors.OUTLINE,
-        )
 
-        self.load_btn = ft.Button(
-            Strings.OpenSaveFile[self.language],
-            icon=ft.Icons.FOLDER_OPEN,
-            on_click=self.on_open_click,
-        )
 
-        self.status_bar = ft.Text(size=12, color=ft.Colors.OUTLINE)
+class _Row(Widget):
+    """Absolute-positioned composite row (children get screen-space rects)."""
 
-        self.fields_column = ft.Column(spacing=8, scroll=ft.ScrollMode.AUTO)
-        self.fields_container = ft.Container(
-            content=self.fields_column,
-            expand=True,
-            padding=10,
-            border=ft.border.Border(
-                ft.border.BorderSide(1, ft.Colors.OUTLINE_VARIANT),
-                ft.border.BorderSide(1, ft.Colors.OUTLINE_VARIANT),
-                ft.border.BorderSide(1, ft.Colors.OUTLINE_VARIANT),
-                ft.border.BorderSide(1, ft.Colors.OUTLINE_VARIANT),
-            ),
-            border_radius=8,
-        )
+    def __init__(self, height):
+        super().__init__()
+        self.children = []
+        self._height = height
 
-        self.save_btn = ft.Button(
-            Strings.SaveFile[self.language],
-            icon=ft.Icons.SAVE,
-            on_click=self.on_save,
-            disabled=True,
-        )
-        self.export_btn = ft.Button(
-            Strings.ExportJSON[self.language],
-            icon=ft.Icons.FILE_DOWNLOAD,
-            on_click=self.on_export_json,
-            disabled=True,
-        )
-        self.import_btn = ft.Button(
-            Strings.ImportJSON[self.language],
-            icon=ft.Icons.FILE_UPLOAD,
-            on_click=self.on_import_json,
-            disabled=True,
-        )
-        self.filter_toggle = ft.Switch(
-            # label=SAFE_TO_EDIT,
-            value=True,
-            on_change=self.on_toggle_filter,
-        )
+    def height(self):
+        return self._height
 
-        self.check_updates_toggle = ft.Switch(
-            value=True,
-            on_change=self.on_toggle_check_updates,
-        )
+    def place(self, rect):
+        self.rect = rect
 
-        self.load_button_row = ft.Row(
-            controls=[
-                self.load_btn,
-                self.import_btn
+    def handle_event(self, event, app):
+        for child in reversed(self.children):
+            if child.rect.collidepoint(event.pos):
+                if child.handle_event(event, app):
+                    return True
+        return False
+
+    def draw(self, surface, theme, fonts, dt=0.0):
+        for child in self.children:
+            child.draw(surface, theme, fonts, dt=dt)
+
+
+class _Badge(Widget):
+    def __init__(self, rect, text):
+        super().__init__(rect)
+        self.text = text
+
+    def draw(self, surface, theme, fonts, dt=0.0):
+        pygame.draw.rect(surface, theme.c("SECONDARY_CONTAINER"), self.rect, border_radius=theme.radius)
+        font = fonts.fm.get_font(10)
+        rendered = font.render(self.text, theme.aa, theme.c("ON_SECONDARY_CONTAINER"))
+        surface.blit(rendered, rendered.get_rect(center=self.rect.center))
+
+
+class FieldRow(_Row):
+    """label + editor control + type badge."""
+
+    MAX_BADGE_W = 110
+    MIN_BADGE_W = 54
+    MIN_LABEL_W = 110
+    MAX_LABEL_W = 220
+    MIN_FIELD_W = 90
+
+    def __init__(self, label_text, field, badge_text, label_key=False):
+        super().__init__(52)
+        self.label = Label(
+            pygame.Rect(0, 0, 200, 22),
+            label_text,
+            color="PRIMARY" if label_key else "ON_SURFACE",
+            bold=label_key,
+            fontsize=14,
+        )
+        self.field = field
+        self.badge = _Badge(pygame.Rect(0, 0, self.MAX_BADGE_W, 24), badge_text)
+        self.children = [self.label, self.field, self.badge]
+
+    def place(self, rect):
+        self.rect = rect
+        label_w = min(self.MAX_LABEL_W, max(self.MIN_LABEL_W, int(rect.w * 0.30)))
+        badge_w = min(self.MAX_BADGE_W, max(self.MIN_BADGE_W, int(rect.w * 0.16)))
+        field_w = max(self.MIN_FIELD_W, rect.w - label_w - 14 - 16 - badge_w)
+        self.label.rect = pygame.Rect(rect.x, rect.y + (rect.h - 22) // 2, label_w, 22)
+        self.field.rect = pygame.Rect(rect.x + label_w + 14, rect.y + (rect.h - 40) // 2, field_w, 40)
+        self.badge.rect = pygame.Rect(self.field.rect.right + 16, rect.y + (rect.h - 24) // 2, badge_w, 24)
+
+
+class HeaderRow(_Row):
+    def __init__(self, title):
+        super().__init__(30)
+        self.label = Label(pygame.Rect(0, 0, 400, 22), title, color="PRIMARY", bold=True, fontsize=14)
+        self.children = [self.label]
+
+    def place(self, rect):
+        self.rect = rect
+        self.label.rect = pygame.Rect(rect.x, rect.y, rect.w, 22)
+
+    def draw(self, surface, theme, fonts, dt=0.0):
+        super().draw(surface, theme, fonts, dt)
+        pygame.draw.rect(surface, theme.c("OUTLINE_VARIANT"), (self.rect.x, self.rect.bottom - 1, self.rect.w, 1))
+
+
+
+class EditorApp(AppBase):
+    def __init__(self):
+        super().__init__(900, 700)
+        self.config = Config()
+        self.language = self.config.get("language", DEFAULT_LANGUAGE)
+        self.check_updates = self.config.get("check_updates", True)
+        self.selected_theme_mode = self.config.get("theme", "PIXEL")
+        self.show_safe_fields_only = self.config.get("show_safe_fields_only", True)
+        self.save = None
+        self.fields_data = []
+        self.widgets_cache = {}
+        self.status_text = ""
+        self.status_error = False
+        self.path_text = ""
+        self.path_selected = False
+        self.route = "/"
+        self.root_widgets = []
+        self.grass = None
+        self.water = None
+        try:
+            from watershader import WaterShader
+            self.water = WaterShader()
+        except Exception:
+            self.water = None
+        self._theme = self._resolve_theme()
+        self._upd_queue = None
+        self._rebuild()
+        pygame.display.set_caption(Strings.MainTitle[self.language])
+        if self.check_updates:
+            self._start_updater()
+
+
+    def _resolve_theme(self):
+        if self.selected_theme_mode == "LIGHT":
+            return Theme(PALETTES["LIGHT"])
+        if self.selected_theme_mode == "DARK":
+            return Theme(PALETTES["DARK"])
+        if self.selected_theme_mode == "PIXEL":
+            return Theme(PALETTES["PIXEL"])
+        detected = Theme.detect_system()
+        return Theme(PALETTES[detected if detected in PALETTES else "DARK"])
+
+    def current_theme(self):
+        return self._theme
+
+
+    def _start_updater(self):
+        self._upd_queue = queue.Queue()
+
+        def worker():
+            try:
+                with urllib.request.urlopen(
+                    "https://api.github.com/repos/qotique/SailwindSaveEditor/releases/latest",
+                    timeout=10,
+                ) as resp:
+                    data = json.loads(resp.read().decode())
+                latest_tag = data.get("tag_name", "")
+                latest = latest_tag.lstrip("v")
+                try:
+                    current_parts = [int(x) for x in VERSION.split(".")]
+                    latest_parts = [int(x) for x in latest.split(".")]
+                    has_update = latest_parts > current_parts
+                except ValueError:
+                    has_update = False
+                if not has_update:
+                    return
+                self._upd_queue.put({
+                    "tag": latest_tag,
+                    "url": data.get("html_url", ""),
+                    "notes": data.get("body") or "",
+                })
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def tick(self, dt):
+        if self._upd_queue is not None:
+            try:
+                result = self._upd_queue.get_nowait()
+            except queue.Empty:
+                result = None
+            if result:
+                self._show_update_dialog(result)
+
+    def _show_update_dialog(self, result):
+        notes = result.get("notes") or Strings.NoReleaseNotesProvided[self.language]
+        url = result.get("url", "")
+        content = (
+            f"{Strings.CurrentVersion[self.language]}: v{VERSION}\n"
+            f"{Strings.LatestVersion[self.language]}: {result['tag']}\n\n"
+            f"--- Release Notes ---\n\n{notes}"
+        )
+        self.dialog = Dialog(
+            title=f"Update Available: {result['tag']}",
+            content=content,
+            buttons=[
+                (Strings.Download[self.language], lambda: webbrowser.open(url) if url else None),
+                (Strings.Dismiss[self.language], None),
             ],
-            spacing=10,
+            app=self,
         )
-        self.save_buttons_row = ft.Row(
-            controls=[
-                self.save_btn,
-                self.export_btn,
-            ]
-        )
+        self.dialog.layout()
+        self.active_dropdown = None
+
+
+    def _rebuild(self):
+        self.root_widgets = []
+        self.active_dropdown = None
+        if self.route == "/settings":
+            self.build_settings_view()
+        else:
+            self.build_main_view()
+        self.layout()
+
+    def on_escape(self):
+        if self.route == "/settings":
+            self.route = "/"
+            self._rebuild()
+
 
     def build_main_view(self):
-        return ft.View(
-                route="/",
-                controls=[
-                    ft.AppBar(
-                        title=ft.Text(
-                        Strings.MainTitle[self.language],
-                        weight=ft.FontWeight.BOLD),
-                        bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
-                    ),
-                    self.settings_btn,
-                    self.load_button_row,
-                    self.path_text,
-                    self.fields_container if self.is_path_selected else ft.Container(),
-                    self.save_buttons_row if self.is_path_selected else ft.Container(),
-                    self.status_bar,
-                ]
-            )
-
-    def build_settings_view(self):
-        return ft.View(
-            route="/settings",
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-            controls=[
-                ft.AppBar(
-                    title=ft.Text(Strings.SettingsTitle[self.language]),
-                    bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
-                ),
-                ft.Text(
-                    Strings.SettingsTitle[self.language],
-                    theme_style=ft.TextThemeStyle.BODY_MEDIUM,
-                ),
-                ft.Container(
-                    width=500,
-                    content=ft.ListTile(
-                        dense=True,
-                        title=ft.Text(Strings.SafeToEditDescription[self.language]),
-                        trailing=self.filter_toggle,
-                    ),
-                ),
-                ft.Container(
-                    width=500,
-                    content=ft.ListTile(
-                        dense=True,
-                        title=ft.Text(
-                            Strings.ChooseTheme[self.language],
-                        ),
-                        trailing=ft.Dropdown(
-                            width=180,
-                            leading_icon=ft.Icons.COLORIZE,
-                            value=self.selected_theme_mode,
-                            options=self.get_theme_options(),
-                            on_select=self.select_theme,
-                        ),
-                    ),
-                ),
-                ft.Container(
-                    width=500,
-                    content=ft.ListTile(
-                        dense=True,
-                        title=ft.Text(Strings.ChooseLanguage[self.language]),
-                        trailing=ft.Dropdown(
-                            width=180,
-                            value=self.language,
-                            options=self.get_language_options(),
-                            on_select=self.select_language,
-                        ),
-                    ),
-                ),
-                ft.Container(
-                    width=500,
-                    content=ft.ListTile(
-                        dense=True,
-                        title=ft.Text(Strings.CheckUpdates[self.language]),
-                        trailing=self.check_updates_toggle,
-                    )
-                )
-            ]
+        self.settings_btn = Button(
+            pygame.Rect(0, 0, 160, 34),
+            Strings.OpenSettings[self.language],
+            on_click=lambda: self._goto("/settings"),
+            kind="outlined",
         )
-
-    async def on_toggle_check_updates(self, e):
-        await self.page.shared_preferences.set("sailwind_editor.check_updates", e.control.value)
-
-    @property
-    def themes(self) -> dict[str, ft.ThemeMode]:
-        return {
-            "SYSTEM": ft.ThemeMode.SYSTEM,
-            "DARK": ft.ThemeMode.DARK,
-            "LIGHT": ft.ThemeMode.LIGHT
-        }
-
-    def get_theme_options(self) -> list[ft.DropdownOption]:
-        return [
-            ft.DropdownOption(key=key, text=key)
-            for key, value in self.themes.items()
+        self.load_btn = Button(
+            pygame.Rect(0, 0, 170, 36),
+            Strings.OpenSaveFile[self.language],
+            on_click=self.on_open_click,
+        )
+        self.import_btn = Button(
+            pygame.Rect(0, 0, 150, 36),
+            Strings.ImportJSON[self.language],
+            on_click=self.on_import_json,
+            kind="outlined",
+        )
+        self.save_btn = Button(
+            pygame.Rect(0, 0, 130, 34),
+            Strings.SaveFile[self.language],
+            on_click=self.on_save,
+        )
+        self.export_btn = Button(
+            pygame.Rect(0, 0, 160, 34),
+            Strings.ExportJSON[self.language],
+            on_click=self.on_export_json,
+            kind="outlined",
+        )
+        self.title_label = Label(
+            pygame.Rect(0, 0, 400, 24),
+            Strings.MainTitle[self.language],
+            color="PRIMARY",
+            bold=True,
+            fontsize=17,
+        )
+        self.path_label = Label(pygame.Rect(0, 0, 500, 20), "", fontsize=13, italic=True)
+        self.status_label = Label(pygame.Rect(0, 0, 500, 18), "", fontsize=12)
+        self.scroll = ScrollArea(pygame.Rect(0, 0, 100, 100))
+        self.root_widgets = [
+            self.title_label,
+            self.settings_btn,
+            self.load_btn,
+            self.import_btn,
+            self.path_label,
+            self.scroll,
+            self.save_btn,
+            self.export_btn,
+            self.status_label,
         ]
-
-    async def select_theme(self, e: ft.Event[ft.Dropdown]):
-        self.selected_theme_mode = e.control.value
-        self.page.theme_mode = self.themes[self.selected_theme_mode]
-        await self.page.shared_preferences.set("sailwind_editor.theme", self.selected_theme_mode)
-        self.page.update()
-
-    @property
-    def languages(self) -> list[str]:
-        return [
-            "English",
-            "Русский",
-            "Українська",
-        ]
-
-    def get_language_options(self) -> list[ft.DropdownOption]:
-        return [
-            ft.DropdownOption(key=language)
-            for language in self.languages
-        ]
-
-    async def select_language(self, e: ft.Event[ft.Dropdown]):
-        last_language_selected = self.language
-        if e.control.value not in ("English", "Русский"):
-            alert = ft.AlertDialog(
-                title=ft.Text(e.control.value + Strings.LanguageNotSupportedYetTitle[self.language]),
-                content=ft.Text(Strings.LanguageNotSupportedYetDescription[self.language]),
-                actions=[ft.TextButton(Strings.Dismiss[self.language], on_click=lambda _: self.page.pop_dialog())],
-                open=True,
-            )
-            self.page.show_dialog(alert)
-            e.control.value = self.language
-            e.control.update()
-            self.page.update()
-            return
-
-        self.language = e.control.value
-        await self.page.shared_preferences.set("sailwind_editor.language", self.language)
-        self.update_ui_texts()
-        self.route_change()
-        if self.save:
-            self.refresh_fields()
-
-    async def _load_settings(self):
-        check_updates = await self.page.shared_preferences.get("sailwind_editor.check_updates")
-        if check_updates is not None:
-            self.check_updates_toggle.value = check_updates
-
-        theme = await self.page.shared_preferences.get("sailwind_editor.theme")
-        if theme:
-            self.selected_theme_mode = theme
-            self.page.theme_mode = self.themes[theme]
-
-        show_safe_fields_only = await self.page.shared_preferences.get("sailwind_editor.show_safe_fields_only")
-        if show_safe_fields_only is not None:
-            self.show_safe_fields_only = show_safe_fields_only
-            self.filter_toggle.value = show_safe_fields_only
-
-        language = await self.page.shared_preferences.get("sailwind_editor.language")
-        if language and language != self.language:
-            self.language = language
-            self.update_ui_texts()
-            self.route_change()
-            if self.save:
-                self.refresh_fields()
-        elif any([check_updates is not None, theme, show_safe_fields_only is not None, language]):
-            self.page.update()
-
-        if self.check_updates_toggle.value:
-            await self.check_for_updates()
-
-    def update_ui_texts(self):
-        self.settings_btn.content = Strings.OpenSettings[self.language]
-        self.load_btn.content = Strings.OpenSaveFile[self.language]
-        self.import_btn.content = Strings.ImportJSON[self.language]
-        self.save_btn.content = Strings.SaveFile[self.language]
-        self.export_btn.content = Strings.ExportJSON[self.language]
-
-        if not self.is_path_selected:
-            self.path_text.value = Strings.NoFileSelected[self.language]
-
-        self.page.title = Strings.MainTitle[self.language]
-
-    def route_change(self):
-        self.page.views.clear()
-        self.page.views.append(self.build_main_view())
-        if self.page.route == "/settings":
-            self.page.views.append(self.build_settings_view())
-        self.page.update()
-
-    async def view_pop(self, e):
-        if e.view is not None:
-            self.page.views.remove(e.view)
-            top_view = self.page.views[-1]
-            await self.page.push_route(top_view.route)
-
-    async def on_toggle_filter(self, e):
-        self.show_safe_fields_only = e.control.value
-        await self.page.shared_preferences.set("sailwind_editor.show_safe_fields_only", e.control.value)
         self.refresh_fields()
 
-    def on_open_click(self, e):
-        self.page.run_task(self._pick_file)
+    def _goto(self, route):
+        self.route = route
+        self._rebuild()
 
-    async def _pick_file(self):
-        files = await self.file_picker.pick_files(
-            dialog_title=Strings.SelectSaveFile[self.language],
-            allow_multiple=False,
-            file_type=ft.FilePickerFileType.CUSTOM,
-            allowed_extensions=['save'],
+
+    def build_settings_view(self):
+        self.settings_panel = Panel(pygame.Rect(0, 0, 100, 100))
+        self.back_btn = Button(
+            pygame.Rect(0, 0, 110, 36),
+            "< " + Strings.SettingsTitle[self.language],
+            on_click=lambda: self._goto("/"),
+            kind="outlined",
         )
-        if files:
-            self.load_file(files[0].path)
+        self.title_label = Label(
+            pygame.Rect(0, 0, 400, 24),
+            Strings.SettingsTitle[self.language],
+            color="PRIMARY",
+            bold=True,
+            fontsize=17,
+        )
+        self.safe_switch = Switch(
+            pygame.Rect(0, 0, 32, 32),
+            value=self.show_safe_fields_only,
+            on_change=self.on_toggle_filter,
+        )
+        self.theme_dropdown = Dropdown(
+            pygame.Rect(0, 0, 180, 36),
+            options=[(k, k) for k in ("SYSTEM", "DARK", "LIGHT", "PIXEL")],
+            value=self.selected_theme_mode,
+            on_change=self.select_theme,
+        )
+        self.lang_dropdown = Dropdown(
+            pygame.Rect(0, 0, 180, 36),
+            options=[(k, k) for k in ("English", "Русский", "Українська")],
+            value=self.language,
+            on_change=self.select_language,
+        )
+        self.updates_switch = Switch(
+            pygame.Rect(0, 0, 32, 32),
+            value=self.check_updates,
+            on_change=self.on_toggle_check_updates,
+        )
+        self.root_widgets = [
+            self.settings_panel,
+            self.back_btn,
+            self.title_label,
+            Label(pygame.Rect(0, 0, 380, 20), Strings.SafeToEditDescription[self.language], fontsize=14),
+            self.safe_switch,
+            Label(pygame.Rect(0, 0, 200, 20), Strings.ChooseTheme[self.language], fontsize=14),
+            self.theme_dropdown,
+            Label(pygame.Rect(0, 0, 200, 20), Strings.ChooseLanguage[self.language], fontsize=14),
+            self.lang_dropdown,
+            Label(pygame.Rect(0, 0, 300, 20), Strings.CheckUpdates[self.language], fontsize=14),
+            self.updates_switch,
+        ]
 
-    def load_file(self, path: str):
+
+    def layout(self):
+        w, h = self.logical_size()
+        if self.route == "/settings":
+            self._layout_settings(w, h)
+        else:
+            self._layout_main(w, h)
+
+    def _layout_main(self, w, h):
+        self.title_label.rect = pygame.Rect(20, 12, w - 280, 24)
+        self.settings_btn.rect = pygame.Rect(w - 184, 10, 164, 34)
+        self.load_btn.rect = pygame.Rect(20, 58, 170, 36)
+        self.import_btn.rect = pygame.Rect(200, 58, 150, 36)
+        self.path_label.rect = pygame.Rect(20, 102, w - 40, 20)
+        self.path_label.text = self.path_text or Strings.NoFileSelected[self.language]
+        self.path_label.color_name = "PRIMARY" if self.path_selected else "OUTLINE"
+        self.save_btn.rect = pygame.Rect(20, h - 48, 130, 34)
+        self.export_btn.rect = pygame.Rect(160, h - 48, 160, 34)
+        self.status_label.rect = pygame.Rect(336, h - 44, w - 356, 18)
+        self.status_label.text = self.status_text
+        self.status_label.color_name = "ERROR" if self.status_error else "OUTLINE"
+        self.scroll.rect = pygame.Rect(20, 132, w - 40, h - 132 - 62)
+        self.scroll.layout()
+
+    def _layout_settings(self, w, h):
+        self.back_btn.rect = pygame.Rect(20, 12, 150, 36)
+        self.title_label.rect = pygame.Rect(190, 16, 300, 24)
+        panel_w = min(600, max(40, w - 40))
+        x0 = (w - panel_w) // 2
+        self.settings_panel.rect = pygame.Rect(x0 - 20, 80, panel_w + 40, 248)
+        self.safe_switch.rect = pygame.Rect(x0 + panel_w - 60, 96, 32, 32)
+        self.theme_dropdown.rect = pygame.Rect(x0 + panel_w - 200, 152, 180, 36)
+        self.lang_dropdown.rect = pygame.Rect(x0 + panel_w - 200, 208, 180, 36)
+        self.updates_switch.rect = pygame.Rect(x0 + panel_w - 60, 276, 32, 32)
+        rows = [
+            (0, Strings.SafeToEditDescription[self.language], (x0 + 60, 96, 380, 20)),
+            (1, Strings.ChooseTheme[self.language], (x0 + 60, 156, 200, 20)),
+            (2, Strings.ChooseLanguage[self.language], (x0 + 60, 212, 200, 20)),
+            (3, Strings.CheckUpdates[self.language], (x0 + 60, 280, 300, 20)),
+        ]
+        for i, text, rect in rows:
+            self.root_widgets[3 + i * 2].text = text
+            self.root_widgets[3 + i * 2].rect = pygame.Rect(rect)
+
+
+    def _snapshot_values(self):
+        snap = {}
+        for name, control in self.widgets_cache.items():
+            try:
+                snap[name] = control.value
+            except Exception:
+                continue
+        return snap
+
+    def refresh_fields(self, preserve=True):
+        snap = self._snapshot_values() if preserve else {}
+        self.widgets_cache.clear()
+        self.grass = None
+        self.scroll.clear()
+
+        if not self.path_selected:
+            if self.save is None:
+                if self._theme.pixel_scale > 1:
+                    self.grass = GrassArea(
+                        pygame.Rect(0, 0, 300, 40),
+                        f"{Strings.NoFileSelected[self.language]}. Touch grass",
+                        app=self,
+                    )
+                    self.scroll.placeholder = self.grass
+                else:
+                    self.scroll.add(PlaceholderText(
+                        pygame.Rect(0, 0, 300, 40), Strings.NoFileSelected[self.language]
+                    ))
+            return
+
+        for entry in self.fields_data:
+            name = entry["name"]
+            if self.show_safe_fields_only and name not in KEY_FIELDS:
+                continue
+            val = entry["value"]
+            ptype = entry.get("type", "?")
+            is_key = name in KEY_FIELDS
+            if name == "playerCurrency":
+                self._render_group("Currency", CURRENCY_NAMES, val, "playerCurrency_", 4, snap)
+            elif name == "currencyRates":
+                self._render_group("Currency Rates", CURRENCY_NAMES, val, "currencyRates_", 4, snap)
+            elif name == "playerReputation":
+                self._render_group("Reputation", REPUTATION_NAMES, val, "playerReputation_", 3, snap)
+            elif name == "lastVisitedPort":
+                self._render_port_dropdown(val, snap)
+            else:
+                self._build_single_field_row(name, val, ptype, is_key, snap)
+
+        self.scroll.layout()
+
+    def _render_group(self, title, names, values, prefix, count, snap):
+        self.scroll.add(HeaderRow(title))
+        for i in range(count):
+            key = f"{prefix}{i}"
+            init = snap.get(key, values[i]) if len(values) > i else ""
+            field = TextField(pygame.Rect(0, 0, 320, 40), initial=str(init))
+            self.widgets_cache[key] = field
+            self.scroll.add(FieldRow(names[i], field, "Int32"))
+
+    def _render_port_dropdown(self, value, snap):
+        name = "lastVisitedPort"
+        options = [(str(k), v) for k, v in PORT_NAMES.items()]
+        field = Dropdown(
+            pygame.Rect(0, 0, 320, 40),
+            options=options,
+            value=str(snap.get(name, value)),
+        )
+        self.widgets_cache[name] = field
+        self.scroll.add(FieldRow(name, field, "Int32", label_key=True))
+
+    def _build_single_field_row(self, name, val, ptype, is_key, snap):
+        init = snap.get(name, val)
+        if name in SLIDER_FIELDS:
+            try:
+                fval = float(init)
+            except (TypeError, ValueError):
+                fval = 0.0
+            field = Slider(
+                pygame.Rect(0, 0, 320, 40),
+                value=fval,
+                min_val=0.0,
+                max_val=100.0,
+                divisions=100,
+                roundto=1,
+            )
+        else:
+            field = TextField(pygame.Rect(0, 0, 320, 40), initial=self._format_value(init))
+        self.widgets_cache[name] = field
+        self.scroll.add(FieldRow(name, field, ptype, label_key=is_key))
+
+
+    def on_open_click(self):
+        path = pick_save_file(Strings.SelectSaveFile[self.language])
+        if path:
+            self.load_file(path)
+
+    def load_file(self, path):
         try:
             self.save = SailwindSave(path)
-            self.path_text.value = os.path.abspath(path)
-            self.is_path_selected = True
-            self.path_text.color = ft.Colors.PRIMARY
+            self.path_text = os.path.abspath(path)
+            self.path_selected = True
             self.fields_data = self.save.get_all_fields()
-            self.refresh_fields()
-            self.save_btn.disabled = False
-            self.export_btn.disabled = False
-            self.import_btn.disabled = False
-            self.status_bar.value = (
+            self.refresh_fields(preserve=False)
+            self.status_text = (
                 f"Loaded: {os.path.basename(path)} | "
                 f"{len(self.fields_data)} fields | "
                 f"{os.path.getsize(path)} bytes"
             )
-            self.route_change()
-            return
+            self.status_error = False
         except Exception as ex:
-            self.status_bar.value = f"Error: {ex}"
-            self.status_bar.color = ft.Colors.ERROR
-        self.page.update()
+            self.status_text = f"Error: {ex}"
+            self.status_error = True
+        self.layout()
 
-    def refresh_fields(self):
-        self.fields_column.controls.clear()
-        self.controls_cache.clear()
+    def on_toggle_filter(self, value):
+        self.show_safe_fields_only = bool(value)
+        self.config.set("show_safe_fields_only", self.show_safe_fields_only)
+        self.refresh_fields()
 
-        for entry in self.fields_data:
-            name = entry['name']
-            if self.show_safe_fields_only and name not in KEY_FIELDS:
-                continue
-            val = entry['value']
-            ptype = entry.get('type', '?')
-            is_key = name in KEY_FIELDS
-            match name:
-                case 'playerCurrency':
-                    self._render_player_currency(value=val)
-                    continue
-                case 'currencyRates':
-                    self._render_currency_rates(value=val)
-                    continue
-                case 'playerReputation':
-                    self._render_player_reputation(value=val)
-                    continue
-                case 'lastVisitedPort':
-                    self._render_last_visited_port(value=val)
-                    continue
+    def on_toggle_check_updates(self, value):
+        self.check_updates = bool(value)
+        self.config.set("check_updates", self.check_updates)
 
-            row = self._build_field_row(name, val, ptype, is_key)
-            self.fields_column.controls.append(row)
+    def select_theme(self, key):
+        self.selected_theme_mode = key
+        self.config.set("theme", key)
+        self._theme = self._resolve_theme()
+        self._rebuild()
 
-        self.page.update()
+    def select_language(self, key):
+        if key not in ("English", "Русский"):
+            self.show_language_dialog(key)
+            return
+        self.language = key
+        self.config.set("language", key)
+        self._rebuild()
+        if self.save:
+            self.refresh_fields()
+        pygame.display.set_caption(Strings.MainTitle[self.language])
 
-    def _render_field_group(self, title: str, names: list[str], values, cache_prefix: str, count: int):
-        rows = [
-            ft.Row(controls=[ft.Text(title)]),
-        ]
-        for i in range(count):
-            label = ft.Text(
-                names[i],
-                weight=ft.FontWeight.BOLD,
-                width=200,
-                color=ft.Colors.PRIMARY,
-            )
-            field = ft.TextField(
-                value=str(values[i]),
-                width=300,
-                height=40,
-                text_size=13,
-            )
-            type_badge = ft.Container(
-                content=ft.Text("Int32", size=10, color=ft.Colors.ON_SECONDARY_CONTAINER),
-                bgcolor=ft.Colors.SECONDARY_CONTAINER,
-                padding=ft.Padding.symmetric(horizontal=6, vertical=2),
-                border_radius=4,
-            )
-            self.controls_cache[f'{cache_prefix}{i}'] = field
-            rows.append(
-                ft.Row(
-                    controls=[label, field, type_badge],
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                )
-            )
-        col = ft.Column(spacing=4, controls=rows)
-        container = ft.Container(
-            content=col,
-            padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+    def show_language_dialog(self, key):
+        self.dialog = Dialog(
+            title=key + Strings.LanguageNotSupportedYetTitle[self.language],
+            content=Strings.LanguageNotSupportedYetDescription[self.language],
+            buttons=[(Strings.Dismiss[self.language], None)],
+            app=self,
         )
-        self.fields_column.controls.append(container)
-        
-    def _render_player_currency(self, value):
-        self._render_field_group("Currency", CURRENCY_NAMES, value, "playerCurrency_", 4)
+        self.dialog.layout()
 
-    def _render_currency_rates(self, value):
-        self._render_field_group("Currency Rates", CURRENCY_NAMES, value, "currencyRates_", 4)
-
-    def _render_player_reputation(self, value):
-        self._render_field_group("Reputation", REPUTATION_NAMES, value, "playerReputation_", 3)
-
-    def _render_last_visited_port(self, value):
-        label = ft.Text(
-            "lastVisitedPort",
-            weight=ft.FontWeight.BOLD,
-            width=200,
-            color=ft.Colors.PRIMARY,
-        )
-        type_badge = ft.Container(
-            content=ft.Text("Int32", size=10, color=ft.Colors.ON_SECONDARY_CONTAINER),
-            bgcolor=ft.Colors.SECONDARY_CONTAINER,
-            padding=ft.Padding.symmetric(horizontal=6, vertical=2),
-            border_radius=4,
-        )
-        dropdown = ft.Dropdown(
-            width=300,
-            value=str(value),
-            options=[
-                ft.DropdownOption(key=str(k), text=v)
-                for k, v in PORT_NAMES.items()
-            ],
-        )
-        self.controls_cache['lastVisitedPort'] = dropdown
-        row = ft.Row(
-            controls=[label, dropdown, type_badge],
-            spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
-        self.fields_column.controls.append(row)
-
-    def _build_field_row(self, name: str, val, ptype: str, is_key: bool):
-        label = ft.Text(
-            name,
-            weight=ft.FontWeight.BOLD if is_key else ft.FontWeight.NORMAL,
-            width=200,
-            color=ft.Colors.PRIMARY if is_key else None,
-        )
-
-        type_badge = ft.Container(
-            content=ft.Text(ptype, size=10, color=ft.Colors.ON_SECONDARY_CONTAINER),
-            bgcolor=ft.Colors.SECONDARY_CONTAINER,
-            padding=ft.Padding.symmetric(horizontal=6, vertical=2),
-            border_radius=4,
-        )
-
-        val_str = self._format_value(val)
-        if name in SLIDER_FIELDS:
-            input_field = ft.Slider(
-                min=0,
-                max=100,
-                value=float(val),
-                label="{value}",
-                round=1,
-                divisions=100,
-            )
-        else:
-            input_field = ft.TextField(
-                value=val_str,
-                width=300,
-                height=40,
-                text_size=13,
-            )
-        self.controls_cache[name] = input_field
-
-        return ft.Row(
-            controls=[label, input_field, type_badge],
-            spacing=8,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
 
     def _format_value(self, val):
         if val is None:
-            return ''
+            return ""
         if isinstance(val, list):
-            return ', '.join(str(v) for v in val)
+            return ", ".join(str(v) for v in val)
         if isinstance(val, float):
-            return f'{val:.4f}'
+            return f"{val:.4f}"
         return str(val)
 
-    def _parse_value(self, name: str, text: str):
-        entry = next((e for e in self.fields_data if e['name'] == name), None)
+    def _parse_value(self, name, text):
+        entry = next((e for e in self.fields_data if e["name"] == name), None)
         if not entry:
             return text
-        ptype = entry.get('prim_type', 0)
-        if entry.get('is_array'):
-            parts = [p.strip() for p in text.split(',') if p.strip()]
+        ptype = entry.get("prim_type", 0)
+        if entry.get("is_array"):
+            parts = [p.strip() for p in str(text).split(",") if p.strip()]
             if ptype == 1:
-                return [p.lower() in ('true', '1', 'yes') for p in parts]
+                return [p.lower() in ("true", "1", "yes") for p in parts]
             elif ptype in (7, 8, 9, 15, 16):
                 return [int(p) for p in parts]
             elif ptype in (6, 11):
                 return [float(p) for p in parts]
             return parts
-        else:
-            if ptype == 1:
-                return text.lower() in ('true', '1', 'yes')
-            elif ptype in (7, 8, 9, 15, 16):
-                return int(text)
-            elif ptype in (6, 11):
-                return float(text)
-            return text
+        if ptype == 1:
+            return str(text).lower() in ("true", "1", "yes")
+        elif ptype in (7, 8, 9, 15, 16):
+            return int(text)
+        elif ptype in (6, 11):
+            return float(text)
+        return text
 
-    def collect_values(self) -> list[tuple[str, any]]:
+    def collect_values(self):
         result = []
-
         curr_values = []
         for i in range(4):
-            ctrl = self.controls_cache.get(f'playerCurrency_{i}')
+            ctrl = self.widgets_cache.get(f"playerCurrency_{i}")
             if ctrl is not None:
                 try:
                     curr_values.append(int(ctrl.value))
                 except ValueError:
                     curr_values.append(0)
         if curr_values:
-            result.append(('playerCurrency', curr_values))
+            result.append(("playerCurrency", curr_values))
 
         rep_values = []
         for i in range(3):
-            ctrl = self.controls_cache.get(f'playerReputation_{i}')
+            ctrl = self.widgets_cache.get(f"playerReputation_{i}")
             if ctrl is not None:
                 try:
                     rep_values.append(int(ctrl.value))
                 except ValueError:
                     rep_values.append(0)
         if rep_values:
-            result.append(('playerReputation', rep_values))
+            result.append(("playerReputation", rep_values))
 
         rate_values = []
         for i in range(4):
-            ctrl = self.controls_cache.get(f'currencyRates_{i}')
+            ctrl = self.widgets_cache.get(f"currencyRates_{i}")
             if ctrl is not None:
                 try:
                     rate_values.append(float(ctrl.value))
                 except ValueError:
                     rate_values.append(0.0)
         if rate_values:
-            result.append(('currencyRates', rate_values))
+            result.append(("currencyRates", rate_values))
 
         for entry in self.fields_data:
-            name = entry['name']
-
-            if name == 'lastVisitedPort':
-                ctrl = self.controls_cache.get(name)
+            name = entry["name"]
+            if name == "lastVisitedPort":
+                ctrl = self.widgets_cache.get(name)
                 if ctrl is not None:
                     result.append((name, ctrl.value))
-                    # for k, v in PORT_NAMES.items():
-                    #     if v == ctrl.value:
-                    #         result.append((name, k))
-                    #         break
                 continue
-
-            ctrl = self.controls_cache.get(name)
+            ctrl = self.widgets_cache.get(name)
             if ctrl is None:
                 continue
             try:
@@ -590,10 +689,9 @@ class EditorApp:
                 result.append((name, parsed))
             except (ValueError, TypeError):
                 pass
-
         return result
 
-    def on_save(self, e):
+    def on_save(self):
         if not self.save:
             return
         changes = self.collect_values()
@@ -601,8 +699,7 @@ class EditorApp:
         errors = []
         for name, new_val in changes:
             try:
-                patches = self.save.patch_field(name, new_val)
-                total_patches += len(patches)
+                total_patches += len(self.save.patch_field(name, new_val))
             except Exception as ex:
                 errors.append(f"{name}: {ex}")
         try:
@@ -610,138 +707,43 @@ class EditorApp:
             msg = f"Saved {size} bytes ({total_patches} patches applied)"
             if errors:
                 msg += f" | Errors: {'; '.join(errors)}"
-            self.status_bar.value = msg
-            self.status_bar.color = ft.Colors.OUTLINE if not errors else ft.Colors.ERROR
+            self.status_text = msg
+            self.status_error = bool(errors)
         except Exception as ex:
-            self.status_bar.value = f"Save error: {ex}"
-            self.status_bar.color = ft.Colors.ERROR
-        self.page.update()
+            self.status_text = f"Save error: {ex}"
+            self.status_error = True
+        self.layout()
 
-    def on_export_json(self, e):
+    def on_export_json(self):
         if not self.save:
             return
         try:
             path = self.save.export_json()
-            self.status_bar.value = f"Exported to {path}"
-            self.status_bar.color = ft.Colors.OUTLINE
+            self.status_text = f"Exported to {path}"
+            self.status_error = False
         except Exception as ex:
-            self.status_bar.value = f"Export error: {ex}"
-            self.status_bar.color = ft.Colors.ERROR
-        self.page.update()
+            self.status_text = f"Export error: {ex}"
+            self.status_error = True
+        self.layout()
 
-    def on_import_json(self, e):
+    def on_import_json(self):
         if not self.save:
             return
         try:
             import_patches = self.save.import_json()
             self.refresh_fields()
-            self.status_bar.value = f"Imported {len(import_patches)} patches from JSON"
-            self.status_bar.color = ft.Colors.OUTLINE
+            self.status_text = f"Imported {len(import_patches)} patches from JSON"
+            self.status_error = False
         except Exception as ex:
-            self.status_bar.value = f"Import error: {ex}"
-            self.status_bar.color = ft.Colors.ERROR
-        self.page.update()
-
-    async def check_for_updates(self, show_up_to_date=False):
-        try:
-            url = "https://api.github.com/repos/qotique/SailwindSaveEditor/releases/latest"
-            loop = asyncio.get_running_loop()
-            response = await loop.run_in_executor(
-                None, lambda: urllib.request.urlopen(url, timeout=10)
-            )
-            data = json.loads(response.read().decode())
-            latest_tag = data.get("tag_name", "")
-            latest = latest_tag.lstrip("v")
-
-            current_parts = [int(x) for x in VERSION.split(".")]
-            latest_parts = [int(x) for x in latest.split(".")]
-
-            if latest_parts > current_parts:
-                release_notes = data.get("body")
-                if not release_notes:
-                    release_notes = await self._fetch_commit_message(latest_tag)
-                await self._show_update_dialog(
-                    latest_tag,
-                    data.get("html_url", ""),
-                    release_notes or "",
-                )
-            elif show_up_to_date:
-                await self._show_up_to_date_dialog()
-        except Exception as ex:
-            if show_up_to_date:
-                await self._show_error_dialog(str(ex))
-
-    async def _fetch_commit_message(self, tag_name):
-        try:
-            loop = asyncio.get_running_loop()
-            url = f"https://api.github.com/repos/qotique/SailwindSaveEditor/git/ref/tags/{tag_name}"
-            ref_resp = await loop.run_in_executor(
-                None, lambda: urllib.request.urlopen(url, timeout=10)
-            )
-            sha = json.loads(ref_resp.read().decode())["object"]["sha"]
-
-            url = f"https://api.github.com/repos/qotique/SailwindSaveEditor/git/commits/{sha}"
-            commit_resp = await loop.run_in_executor(
-                None, lambda: urllib.request.urlopen(url, timeout=10)
-            )
-            return json.loads(commit_resp.read().decode()).get("message", "")
-        except Exception:
-            return None
-
-    async def _show_update_dialog(self, latest_tag, release_url, release_notes):
-        notes_text = (
-            release_notes
-            if release_notes
-            else Strings.NoReleaseNotesProvided[self.language]
-        )
-        alert = ft.AlertDialog(
-            title=ft.Text(f"Update Available: {latest_tag}"),
-            content=ft.Text(
-                f"{Strings.CurrentVersion[self.language]}: v{VERSION}\n"
-                f"{Strings.LatestVersion[self.language]}: {latest_tag}\n\n"
-                f"--- Release Notes ---\n\n"
-                f"{notes_text}",
-                selectable=True,
-            ),
-            actions=[
-                ft.TextButton(
-                    Strings.Download[self.language],
-                    on_click=lambda _: (
-                        webbrowser.open(release_url),
-                        self.page.pop_dialog(),
-                    ),
-                ),
-                ft.TextButton(
-                    Strings.Dismiss[self.language],
-                    on_click=lambda _: self.page.pop_dialog(),
-                ),
-            ],
-            open=True,
-        )
-        self.page.show_dialog(alert)
-
-    async def _show_up_to_date_dialog(self):
-        alert = ft.AlertDialog(
-            title=ft.Text("No Updates"),
-            content=ft.Text(f"You have the latest version (v{VERSION})."),
-            actions=[ft.TextButton("OK", on_click=lambda _: self.page.pop_dialog())],
-            open=True,
-        )
-        self.page.show_dialog(alert)
-
-    async def _show_error_dialog(self, error_msg):
-        alert = ft.AlertDialog(
-            title=ft.Text(Strings.CheckFailed[self.language]),
-            content=ft.Text(f"Could not check for updates:\n{error_msg}"),
-            actions=[ft.TextButton("OK", on_click=lambda _: self.page.pop_dialog())],
-            open=True,
-        )
-        self.page.show_dialog(alert)
+            self.status_text = f"Import error: {ex}"
+            self.status_error = True
+        self.layout()
 
 
 def main():
-    ft.app(target=EditorApp)
+    app = EditorApp()
+    app.run_loop()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

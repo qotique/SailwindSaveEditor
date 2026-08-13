@@ -2,7 +2,6 @@ import abc
 
 class MetaAbstractString(abc.ABCMeta):
     def __getitem__(cls, language: str) -> str:
-        # cls — это сам класс (например, MainTitle)
         if language in cls.translations:
             return cls.translations[language]
         return "Missing translation"
