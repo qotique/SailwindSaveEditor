@@ -58,7 +58,7 @@ REPUTATION_NAMES = {
     2: 'Aestrin',
 }
 
-PORT_NAMES = {  # placeholders, i will switch to real port names
+PORT_NAMES = {
     0: 'Gold Rock City',
     1: 'Al\'Nilem',
     2: 'Neverdin',
@@ -66,8 +66,6 @@ PORT_NAMES = {  # placeholders, i will switch to real port names
     4: 'Alchemist\'s Island',
     5: 'Al\'Ankh Academy',
     6: 'Oasis',
-    # 7: 'UNKNOWN',
-    # 8: 'UNKNOWN',
     9: 'Dragon Cliffs',
     10: 'Sanctuary',
     11: 'Crab Beach',
@@ -83,7 +81,6 @@ PORT_NAMES = {  # placeholders, i will switch to real port names
     21: 'Chronos',
     22: 'Kicia Bay',
     23: 'Fire Fish Town',
-    # 24: 'UNKNOWN',
     25: 'Sen\'na',
     26: 'Aestra Abbey',
     27: 'Fey Valley',
@@ -92,8 +89,6 @@ PORT_NAMES = {  # placeholders, i will switch to real port names
     30: 'Dead Cove',
     31: 'Old Ankh Town',
     32: 'Mirage Mountain',
-    # 33: 'UNKNOWN',
-    # 34: 'UNKNOWN'
 }
 
 def find_all_prim_arrays(data):
@@ -226,8 +221,8 @@ def find_save_container_fields(data):
         elif bt == 7:
             rt = data[pos]
             if rt == 15:
-                pos += 1  # record type
-                pos += 4  # oid
+                pos += 1
+                pos += 4
                 cnt = struct.unpack_from('<i', data, pos)[0]; pos += 4
                 pt2 = data[pos]; pos += 1
                 pname2 = PRIM_NAMES.get(pt2, f'Prim{pt2}')
